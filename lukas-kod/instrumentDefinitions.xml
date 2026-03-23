@@ -1,0 +1,461 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<InstrumentConfigNodes>
+  <SampleTechType SubCode="SampleTechMajor">
+    <SampleTechType1 DisplayName="Not Attached">
+      1
+    </SampleTechType1>
+    <SampleTechType2 DisplayName="ATR" SubCode1="AtrType" SubCode2="AtrMaterial" SubCode3="AtrPress">
+      2
+    </SampleTechType2>
+    <SampleTechType3 DisplayName="Transmission" SubCode1="TransType">
+      3
+    </SampleTechType3>
+    <SampleTechType4 DisplayName="Reflectance" SubCode1="ReflType" SubCode2="ReflAngle" SubCode3="ReflScreen">
+      4
+    </SampleTechType4>
+    <SampleTechType5 DisplayName="Gas Cell" SubCode1="GasCellType">
+      5
+    </SampleTechType5>
+    <SampleTechType6 DisplayName="Microspectroscopy" SubCode1="MicroType" Valid="false">
+      6
+    </SampleTechType6>
+    <SampleTechType7 DisplayName="Fiber" SubCode1="FiberType" Valid="false">
+      7
+    </SampleTechType7>
+    <SampleTechType8 DisplayName="Misc" SubCode1="MiscType" Valid="false">
+      8
+    </SampleTechType8>
+  </SampleTechType>
+  <AtrType SubCode="SubCode1">
+    <AtrType1 DisplayName="1-bounce">
+      1
+    </AtrType1>
+    <AtrType2 DisplayName="3-bounce">
+      2
+    </AtrType2>
+    <AtrType3 DisplayName="9-bounce">
+      3
+    </AtrType3>
+    <AtrType4 DisplayName="5-bounce">
+      4
+    </AtrType4>
+  </AtrType>
+  <AtrMaterial SubCode="SubCode2">
+    <AtrMaterial1 DisplayName="ZnSe">
+      1
+    </AtrMaterial1>
+    <AtrMaterial2 DisplayName="Si">
+      2
+    </AtrMaterial2>
+    <AtrMaterial3 DisplayName="Ge">
+      3
+    </AtrMaterial3>
+    <AtrMaterial4 DisplayName="Diamond">
+      4
+    </AtrMaterial4>
+  </AtrMaterial>
+  <AtrPress SubCode="SubCode3">
+    <AtrPress1 DisplayName="None">
+      1
+    </AtrPress1>
+    <AtrPress2 DisplayName="Lever Press">
+      2
+    </AtrPress2>
+    <AtrPress3 DisplayName="Mini Pressure Tower">
+      3
+    </AtrPress3>
+    <AtrPress4 DisplayName="Handheld">
+      4
+    </AtrPress4>
+  </AtrPress>
+  <TransType SubCode="SubCode1">
+    <TransType1 DisplayName="Tumblir">
+      1
+    </TransType1>
+    <TransType2 DisplayName="DialPath" InternalName="TriTumblir">
+      2
+    </TransType2>
+    <TransType3 DisplayName="Module">
+      3
+    </TransType3>
+  </TransType>
+  <ReflType SubCode="SubCode1">
+    <ReflType1 DisplayName="Specular">
+      1
+    </ReflType1>
+    <ReflType2 DisplayName="Diffuse">
+      2
+    </ReflType2>
+    <ReflType3 DisplayName="Grazing Angle">
+      3
+    </ReflType3>
+    <ReflType4 DisplayName="Diffuse NIR" Valid="false">
+      4
+    </ReflType4>
+    <ReflType5 DisplayName="Inetgrating Sphere" Valid="false">
+      5
+    </ReflType5>
+    <ReflType6 DisplayName="Retro" AllowLaserCal="false">
+      6
+    </ReflType6>
+  </ReflType>
+  <ReflAngle SubCode="SubCode2">
+    <ReflAngle0 DisplayName="Undefined">
+      0
+    </ReflAngle0>
+    <ReflAngle1 DisplayName="10 Degrees">
+      1
+    </ReflAngle1>
+    <ReflAngle2 DisplayName="45 Degrees">
+      2
+    </ReflAngle2>
+  </ReflAngle>
+  <ReflScreen SubCode="SubCode3">
+    <ReflScreen0 DisplayName="Undefined" Valid="false">
+      0
+    </ReflScreen0>
+    <ReflScreen1 DisplayName="None">
+      1
+    </ReflScreen1>
+    <ReflScreen2 DisplayName="MCT Retro Screen">
+      2
+    </ReflScreen2>
+  </ReflScreen>
+  <AccessoryChangeType>
+    <AccessoryChangeType1 DisplayName="Single No Change">
+      1
+    </AccessoryChangeType1>
+    <AccessoryChangeType2 DisplayName="Manual Change">
+      2
+    </AccessoryChangeType2>
+    <AccessoryChangeType3 DisplayName="RFID Change">
+      3
+    </AccessoryChangeType3>
+  </AccessoryChangeType>
+  <GasCellType SubCode="SubCode1">
+    <GasCellType0 DisplayName="Undefined" Valid="false">
+      0
+    </GasCellType0>
+    <GasCellType1 DisplayName="Standard">
+      1
+    </GasCellType1>
+  </GasCellType>
+  <MicroType SubCode="SubCode1">
+    <MicroType0 DisplayName="Undefined" Valid="false">
+      0
+    </MicroType0>
+    <MicroType1 DisplayName="QA Scope">
+      1
+    </MicroType1>
+  </MicroType>
+  <FiberType SubCode="SubCode1">
+    <FiberType0 DisplayName="Undefined" Valid="false">
+      0
+    </FiberType0>
+    <FiberType1 DisplayName="Chalcogenide">
+      1
+    </FiberType1>
+    <FiberType2 DisplayName="AgX">
+      2
+    </FiberType2>
+    <FiberType3 DisplayName="Silica">
+      3
+    </FiberType3>
+  </FiberType>
+  <MiscType SubCode="SubCode1">
+    <MiscType0 DisplayName="Undefined" Valid="false">
+      0
+    </MiscType0>
+    <MiscType1 DisplayName="TGA">
+      1
+    </MiscType1>
+    <MiscType2 DisplayName="PAS">
+      2
+    </MiscType2>
+  </MiscType>
+  <Optics SubCode="OpticsType">
+    <Optics0 DisplayName="None" Valid="false">
+      0
+    </Optics0>
+    <Optics1 DisplayName="None">
+      1
+    </Optics1>
+    <Optics2 DisplayName="KBr">
+      2
+    </Optics2>
+    <Optics3 DisplayName="ZnSe">
+      3
+    </Optics3>
+    <Optics4 DisplayName="CaF2" Valid="false">
+      4
+    </Optics4>
+    <Optics5 DisplayName="Quartz" Valid="false">
+      5
+    </Optics5>
+  </Optics>
+  <Detector SubCode="DetectorType">
+    <Detector0 DisplayName="None" Valid="false">
+      0
+    </Detector0>
+    <Detector1 DisplayName="None">
+      1
+    </Detector1>
+    <Detector2 DisplayName="DTGS">
+      2
+    </Detector2>
+    <Detector3 DisplayName="MCT">
+      3
+    </Detector3>
+    <Detector4 DisplayName="MCT (PV)" Valid="false">
+      4
+    </Detector4>
+    <Detector5 DisplayName="InGaAs" Valid="false">
+      5
+    </Detector5>
+    <Detector6 DisplayName="PbSe" Valid="false">
+      6
+    </Detector6>
+    <Detector7 DisplayName="External" Valid="false">
+      7
+    </Detector7>
+  </Detector>
+  <DetectorLocation SubCode="DetLocation">
+    <DetectorLocation0 DisplayName="Undefined">
+      0
+    </DetectorLocation0>
+    <DetectorLocation1 DisplayName="Internal">
+      1
+    </DetectorLocation1>
+    <DetectorLocation2 DisplayName="External">
+      2
+    </DetectorLocation2>
+  </DetectorLocation>
+  <LaserType SubCode="LaserTypeEx">
+    <LaseType0 DisplayName="None">
+      0
+    </LaseType0>
+    <LaseType1 LaserType="1" DisplayName="Diode">
+      1
+    </LaseType1>
+    <LaseType2 LaserType="2" DisplayName="HeNe">
+      2
+    </LaseType2>
+  </LaserType>
+  <IRSourceType SubCode="IrSourceType">
+    <IRSourceType0 DisplayName="Undefined">
+      0
+    </IRSourceType0>
+    <IRSourceType1 DisplayName="Standard">
+      1
+    </IRSourceType1>
+    <IRSourceType2 DisplayName="Thin Film">
+      2
+    </IRSourceType2>
+  </IRSourceType>
+  <InstrumentConfigs>
+    <Instrument InstType="1" DisplayName="5500 Series" InternalName="ML" AccessoryChangeType="1" Optics="All" Detector="All" DetectorLocation="All" LaserType="All" IRSourceType="All">
+      <Accessory SampleTechType="2">
+        <SubType AtrType="1">
+          <SubType AtrMaterial="4">
+            <!-- 1B Diamond ATR -->
+            <SubType AtrPress="3" AllowPrimary="true" />
+          </SubType>
+        </SubType>
+		<SubType AtrType="2">
+          <SubType AtrMaterial="4">
+            <!-- 3B Diamond ATR -->
+            <SubType AtrPress="1" AllowPrimary="true" />
+          </SubType>
+        </SubType>
+        <SubType AtrType="4">
+          <SubType AtrMaterial="1">
+          <!-- 9B Diamond ATR -->
+            <SubType AtrPress="1" />
+          </SubType>
+        </SubType>
+        <SubType AtrType="3">
+          <SubType AtrMaterial="4">
+            <!-- 5B Diamond ATR -->
+            <SubType AtrPress="1" />
+          </SubType>
+        </SubType>        
+      </Accessory>
+      <Accessory SampleTechType="3">
+        <!-- Dialpath -->
+        <SubType TransType="2" AllowPrimary="true" />
+        <!-- TumblIR -->
+        <SubType TransType="1" AllowPrimary="true" />
+      </Accessory>
+    </Instrument>
+    <Instrument InstType="2" DisplayName="4500 Series" InternalName="MLp" AccessoryChangeType="1" Optics="All" Detector="All" DetectorLocation="All" LaserType="All" IRSourceType="All">
+      <Accessory SampleTechType="2">
+        <SubType AtrType="1">
+          <SubType AtrMaterial="4">
+            <!-- 1B Diamond ATR -->
+            <SubType AtrPress="3" AllowPrimary="true" />
+          </SubType>
+        </SubType>
+        <SubType AtrType="2">
+          <SubType AtrMaterial="4">
+            <!-- 3B Diamond ATR -->
+            <SubType AtrPress="1" AllowPrimary="true" />
+          </SubType>
+        </SubType>
+        <SubType AtrType="4">
+          <SubType AtrMaterial="1">
+            <!-- 9B Diamond ATR -->
+            <SubType AtrPress="1" />
+          </SubType>
+        </SubType>
+        <SubType AtrType="3">
+          <SubType AtrMaterial="4">
+            <!-- 5B Diamond ATR -->
+            <SubType AtrPress="1" />
+          </SubType>
+        </SubType>
+      </Accessory>
+      <Accessory SampleTechType="3">
+        <!-- Dialpath -->
+        <SubType TransType="2" AllowPrimary="true" />
+        <!-- TumblIR -->
+        <SubType TransType="1" AllowPrimary="true" />
+      </Accessory>
+    </Instrument>
+    <Instrument InstType="4" DisplayName="4100 Exoscan" AccessoryChangeType="2" Optics="All" Detector="All" DetectorLocation="All" LaserType="All" IRSourceType="All">
+      <Accessory SampleTechType="2">
+        <SubType AtrType="1">
+          <SubType AtrMaterial="4">
+            <!-- 1B Diamond ATR -->
+            <SubType AtrPress="4" />
+          </SubType>
+          <SubType AtrMaterial="3">
+            <!-- 1B Germanium ATR -->
+            <SubType AtrPress="4" />
+          </SubType>
+        </SubType>
+      </Accessory>
+      <Accessory SampleTechType="4">
+        <SubType ReflType="2">
+          <!-- Diffuse -->
+          <SubType ReflAngle="0" />
+        </SubType>
+        <SubType ReflType="3">
+          <!-- Grazing -->
+          <SubType ReflAngle="0" />
+        </SubType>
+        <SubType ReflType="1">
+          <!-- Specular -->
+          <SubType ReflAngle="1" AllowPrimary="true" />
+        </SubType>
+      </Accessory>
+    </Instrument>
+    <Instrument InstType="5" DisplayName="4200 FlexScan" Valid="true" AccessoryChangeType="1" Optics="All" Detector="All" DetectorLocation="All" LaserType="All" IRSourceType="All">
+      <Accessory SampleTechType="2">
+        <SubType AtrType="1">
+          <SubType AtrMaterial="4">
+            <!-- 1B Diamond ATR -->
+            <SubType AtrPress="1" />
+          </SubType>
+          <SubType AtrMaterial="3">
+            <!-- 1B Germanium ATR -->
+            <SubType AtrPress="1" />
+          </SubType>
+        </SubType>
+      </Accessory>
+      <Accessory SampleTechType="4">
+        <SubType ReflType="2">
+          <!-- Diffuse -->
+          <SubType ReflAngle="0" />
+        </SubType>
+        <SubType ReflType="3">
+          <!-- Grazing -->
+          <SubType ReflAngle="0" />
+        </SubType>
+        <SubType ReflType="1">
+          <!-- Specular -->
+          <SubType ReflAngle="2" AllowPrimary="true" />
+        </SubType>
+      </Accessory>
+    </Instrument>
+    <Instrument InstType="6" DisplayName="Cary 630" InternalName="Mini" AccessoryChangeType="3" Optics="All" Detector="All" DetectorLocation="All" LaserType="All" IRSourceType="All">
+      <Accessory SampleTechType="2">
+        <SubType AtrType="1">
+          <SubType AtrMaterial="4">
+            <!-- 1B Diamond ATR -->
+            <SubType AtrPress="3" AllowPrimary="true" />
+          </SubType>
+          <SubType AtrMaterial="3">
+            <!-- 1B Germanium ATR -->
+            <SubType AtrPress="3" AllowPrimary="true" />
+          </SubType>
+          <SubType AtrMaterial="1">
+            <!-- 1B ZnSe ATR -->
+            <SubType AtrPress="3" AllowPrimary="true" />
+          </SubType>
+        </SubType>
+        <SubType AtrType="4">
+          <SubType AtrMaterial="1">
+            <!-- 5B ZnSe ATR -->
+            <SubType AtrPress="1" />
+          </SubType>
+        </SubType>
+      </Accessory>
+      <Accessory SampleTechType="4">
+        <SubType ReflType="2">
+          <!-- Diffuse -->
+          <SubType ReflAngle="0" />
+        </SubType>
+        <SubType ReflType="1">
+          <SubType ReflAngle="1">
+            <!-- 10 Degree Spec Reflectance -->
+            <SubType ReflScreen="0" />
+          </SubType>
+        </SubType>
+        <SubType ReflType="6">
+          <!-- Retro -->
+          <SubType ReflAngle="0" AllowPrimary="true" />
+        </SubType>
+      </Accessory>
+      <Accessory SampleTechType="3">
+        <!-- Tumblir -->
+        <SubType TransType="1" AllowPrimary="true" />
+        <!-- DialPath -->
+        <SubType TransType="2" AllowPrimary="true" />
+        <!-- Transmission -->
+        <SubType TransType="3" AllowPrimary="true" /> 
+      </Accessory>
+    </Instrument>
+    <Instrument InstType="8" DisplayName="4300" InternalName="TopScan" AccessoryChangeType="3" Optics="All" Detector="All" DetectorLocation="All" LaserType="All" IRSourceType="All">
+      <Accessory SampleTechType="2">
+        <SubType AtrType="1">
+          <SubType AtrMaterial="4">
+            <!-- 1B Diamond ATR -->
+            <SubType AtrPress="1" />
+          </SubType>
+          <SubType AtrMaterial="3">
+            <!-- 1B Ge ATR -->
+            <SubType AtrPress="1" />
+          </SubType>
+        </SubType>
+      </Accessory>
+      <Accessory SampleTechType="4">
+        <SubType ReflType="2">
+          <!-- Diffuse Reflectance -->
+          <SubType ReflAngle="0" />
+        </SubType>
+        <SubType ReflType="3">
+          <!-- Grazing Angle -->
+          <SubType ReflAngle="0" />
+        </SubType>
+        <SubType ReflType="6">
+          <!-- Retro Reflector -->
+          <SubType ReflAngle="0" AllowPrimary="true" />
+        </SubType>
+        <SubType ReflType="1">
+          <!-- Specular Reflectance -->
+          <SubType ReflAngle="0" />
+        </SubType>
+      </Accessory>
+    </Instrument>
+  </InstrumentConfigs>
+</InstrumentConfigNodes>
