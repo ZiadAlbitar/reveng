@@ -53,3 +53,5 @@ ChatGPT:
 Enligt docs sen innan finns det en header inuti själva payloaden, och det verkar inte som vi behöver bry oss så mycket om usb headern vi har kollat på innan
 
 Docsen snackar om att det finns ett fält för type och command, men vissa cmd och type värden dyker aldrig upp, vilket betyder att någonstans finns det något fel. Antigen att vissa värden på typer och commands är dokumenterade fel, men kan även vara så att de fälten inte alls vad vi tror de är.
+
+Docsen nämer också aldrig port nummer 6, så det verkar missats någonting där, oklart om det är viktigt då inte många paket skickas där. De nämner aldrig port 0 men det är en usb handshake som jag tror vi inte behöver bry oss om.
