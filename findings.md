@@ -55,3 +55,7 @@ Enligt docs sen innan finns det en header inuti själva payloaden, och det verka
 Docsen snackar om att det finns ett fält för type och command, men vissa cmd och type värden dyker aldrig upp, vilket betyder att någonstans finns det något fel. Antigen att vissa värden på typer och commands är dokumenterade fel, men kan även vara så att de fälten inte alls vad vi tror de är.
 
 Docsen nämer också aldrig port nummer 6, så det verkar missats någonting där, oklart om det är viktigt då inte många paket skickas där. De nämner aldrig port 0 men det är en usb handshake som jag tror vi inte behöver bry oss om.
+
+# Bartek, 26 mars
+1.20.5 verkar vara data under en mätning. Den stora payloaden är 512 bytes, dock formen på själva värden är oklar för stunden. Det verkar som att de är inte traditionella 8 byte floating-points eller fixed-points utifrån testning av att läsa av en mätning.
+
