@@ -19,7 +19,7 @@ De mesta av informationen är att vi skickar en paket på 91 till .4, får tillb
 Värt att kolla upp:
 Hur skiljer sig paketen som går igenom portarna 3->6. Framförallt headern för att det är lättast att se skillnad. På något sätt borde det förklara vad man ska göra med informationen gissningsvis.
 
-# Ziad
+# Ziad, mars 25
 Enligt hur de beskriver handshaken i driver-guide.md borde handshaken vara:
     Frame 7  - OUT type 0x0d, cmd 0x00              host   -> device
     Frame 8  - bekräftelse                          device -> host
@@ -46,5 +46,10 @@ ChatGPT:
 | `0x08` | Host command          |
 | `0x09` | Command response      |
 | `0x0D` | Session/control/reset |
-| `0x0B` | Pipe/transfer setup   |
-| `0x18` | Data stream packets   |
+| `0x0B` | Pipe/transfer setup   | 
+| `0x18` | Data stream packets   | Verkar inte finnas?
+
+# Ziad, mars 26
+Enligt docs sen innan finns det en header inuti själva payloaden, och det verkar inte som vi behöver bry oss så mycket om usb headern vi har kollat på innan
+
+Docsen snackar om att det finns ett fält för type och command, men vissa cmd och type värden dyker aldrig upp, vilket betyder att någonstans finns det något fel. Antigen att vissa värden på typer och commands är dokumenterade fel, men kan även vara så att de fälten inte alls vad vi tror de är.
