@@ -59,3 +59,6 @@ Docsen nämer också aldrig port nummer 6, så det verkar missats någonting dä
 # Bartek, 26 mars
 1.20.5 verkar vara data under en mätning. Den stora payloaden är 512 bytes, dock formen på själva värden är oklar för stunden. Det verkar som att de är inte traditionella 8 byte floating-points eller fixed-points utifrån testning av att läsa av en mätning.
 
+# Bartek, 30 mars
+Har laddat ner ILSpy samt MicroLab PC och dekompilerat .dll filer till C#. Har börjat leta runt på information gällande omvandling av sampling datan samt resultat outputen. Har inte hittat några fourier transformen i koden men har hittat klasserna där resultatet förvaras.
+Samt fått en genomgång på hur man gör en mätning med spektrometer i labbsalen och dokumeterat det.
