@@ -2,8 +2,12 @@ import usb.util
 import usb.core
 import struct
 import logging
-
+from typing import Optional, Tuple, List
 from dataframe import Frame
+import os
+import sys
+import argparse
+import libusb_package
 
 DEFAULT_TIMEOUT_MS = 2_000
 MAX_PACKET = 512
@@ -13,11 +17,14 @@ BULK_OUT_EP = 0x04
 BULK_IN_PRIMARY = 0x83
 BULK_IN_SECONDARY = 0x85
 
+backend = libusb_package.get_libusb1_backend()
+
 class CaryFTIR:
-    def __init__(self, dev: usb.core.Device):
+    def __init__(self, dev: usb.core.Device, interface: int = 0):
         self.dev = dev
         self.sequence = 0
         self.log = logging.getLogger("CaryFTIR")
+        self.interface =  interface
 
     # ------------------------------------------------------------------ #
     # USB helpers
@@ -60,9 +67,9 @@ class CaryFTIR:
         
     def _read(self, endpoint: int = BULK_IN_PRIMARY, timeout: int = DEFAULT_TIMEOUT_MS) -> bytes:
         # Logging debug info
-        self.log.debug("USB IN  %s", data.hex())
         # reading from machine
         data = bytes(self.dev.read(endpoint, MAX_PACKET, timeout=timeout))
+        self.log.debug("USB IN  %s", data.hex())
         return data
     # receives a frame 
     def _recv_frame(self, endpoint: int = BULK_IN_PRIMARY, timeout: int = DEFAULT_TIMEOUT_MS) -> Frame:
@@ -84,6 +91,7 @@ class CaryFTIR:
             param1=param1,
             payload=raw[16:],
         )
+        return frame
 
     # Simply writes the frame to send it
     def send_frame(
@@ -123,4 +131,109 @@ class CaryFTIR:
         if frame.type != 0x0D or frame.command != 0x07:
             raise IOError(f"unexpected reset reply: {frame}")
         self.log.info("Link reset acknowledged: %s", frame)
+
+    def query_version(self) -> Tuple[int, int]:
+        """Send cmd=0x01 and return (family, status_flags)."""
+        self.send_frame(0x08, 0x01, param0=0x00002A01)
+        frame = self._recv_frame()
+        if frame.status != 0x40 or frame.command != 0x01:
+            raise IOError(f"version query failed: {frame}")
+        family = frame.param0
+        self.log.info("Instrument family 0x%08x", family)
+        return family, frame.flags
     
+    def query_runtime_counters(self) -> Tuple[int, int]:
+        """Send cmd=0x68 and return the 24-bit counters from the payload."""
+        self.send_frame(0x08, 0x68)
+        frame = self._recv_frame()
+        if frame.command != 0x68 or frame.status != 0x40:
+            raise IOError(f"counter query failed: {frame}")
+        # Counters arrive as 0x10 payload bytes; pack them from the payload.
+        left = struct.unpack_from("<I", frame.payload, 0)[0] & 0x00FFFFFF
+        right = struct.unpack_from("<I", frame.payload, 4)[0] & 0x00FFFFFF
+        return left, right
+
+def parse_args(argv: List[str]) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Run a Cary FTIR measurement using pyusb.")
+    parser.add_argument("--vid", type=lambda x: int(x, 0), default=4020, help="USB vendor ID (e.g. 0x0957)")
+    parser.add_argument("--pid", type=lambda x: int(x, 0), default=513, help="USB product ID")
+    parser.add_argument("--start", type=float, default=4000.0, help="Start wavenumber (cm^-1)")
+    parser.add_argument("--stop", type=float, default=650.0, help="Stop wavenumber (cm^-1)")
+    parser.add_argument("--resolution", type=int, default=4, help="Resolution setting (points)")
+    parser.add_argument("--out", type=str, help="Dump raw spectral payloads to file")
+    parser.add_argument("--verbose", action="store_true", help="Enable debug logging")
+    return parser.parse_args(argv)
+
+def configure_logging(verbose: bool) -> None:
+    if verbose:
+        level = logging.DEBUG
+    else:
+        level = logging.INFO
+    logging.basicConfig(level=level, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+        
+def find_device(vendor_id: int, product_id: int) -> usb.core.Device:
+    dev = usb.core.find(idVendor=vendor_id, idProduct=product_id, backend=backend)
+    if not isinstance(dev, usb.core.Device):
+        raise IOError(f"Device VID=0x{vendor_id:04x} PID=0x{product_id:04x} not found")
+    if os.name == "posix":
+        if dev.is_kernel_driver_active(0):
+            dev.detach_kernel_driver(0)
+        dev.set_configuration()
+        usb.util.claim_interface(dev, 0)
+    return dev
+
+def run_measurement(
+    vendor_id: int,
+    product_id: int,
+    start_cm: float,
+    stop_cm: float,
+    resolution: int,
+    output: Optional[str],
+) -> None:
+    dev = find_device(vendor_id, product_id)
+    driver = CaryFTIR(dev)
+    for cfg in driver.dev:
+        for intf in cfg:
+            for ep in intf:
+                print(hex(ep.bEndpointAddress), ep.bmAttributes)
+    print("OOOOOOOOOOOOOOOOOOOOOOOOOOO")
+
+    driver.reset_link()
+    driver.query_version()
+    counters = driver.query_runtime_counters()
+    logging.info("Runtime counters: %s", counters)
+
+    # profile = driver.request_profile_block(0x0C00, 0x0100)
+    # logging.info("Profile digest: %s", profile[:16].hex())
+
+    # driver.push_compute_params()
+    # driver.start_collect(start_cm, stop_cm, resolution)
+
+    # raw_frames = driver.read_spectrum(duration=10.0)
+    # if output:
+    #     with open(output, "wb") as fh:
+    #         for frame in raw_frames:
+    #             fh.write(frame.payload)
+    #     logging.info("Wrote %d frames to %s", len(raw_frames), output)
+    # else:
+    #     logging.info("Captured %d frames (no output file specified)", len(raw_frames))
+
+def main(argv: List[str]) -> None:
+    args = parse_args(argv)
+    configure_logging(args.verbose)
+    try:
+        run_measurement(
+            vendor_id=args.vid,
+            product_id=args.pid,
+            start_cm=args.start,
+            stop_cm=args.stop,
+            resolution=args.resolution,
+            output=args.out,
+        )
+    except Exception as exc:  # pylint: disable=broad-except
+        logging.error("Measurement failed: %s", exc, exc_info=args.verbose)
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])
