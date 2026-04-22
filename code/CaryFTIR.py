@@ -1,3 +1,29 @@
+"""
+Prototype USB driver for Cary FTIR instruments using pyusb.
+
+The script mirrors the reverse-engineered protocol documented in:
+  - docs/usb-protocol.md
+  - docs/driver-guide.md
+
+It performs the following high-level steps:
+  1. Locate the WinUSB interface (interface 0) for the target VID/PID.
+  2. Execute the five-stage handshake (reset, version query, counters, register dump).
+  3. Subscribe to status notifications.
+  4. Push default collection parameters (igram/single-beam settings).
+  5. Start a single-beam collect and stream the raw spectral data.
+
+Spectral payload decoding is left as a TODO (blocks arriving on pipe 0x85
+with `type 0x18` are written to disk for later analysis).
+
+Requires:
+    pip install pyusb
+    pip install libusb1
+
+    ensure libusb-1.0.dll is in your path    
+"""
+
+
+
 import usb.util
 import usb.core
 import struct
@@ -7,7 +33,7 @@ from dataframe import Frame
 import os
 import sys
 import argparse
-import libusb_package
+import usb.backend.libusb1
 
 DEFAULT_TIMEOUT_MS = 2_000
 MAX_PACKET = 512
@@ -17,7 +43,9 @@ BULK_OUT_EP = 0x04
 BULK_IN_PRIMARY = 0x83
 BULK_IN_SECONDARY = 0x85
 
-backend = libusb_package.get_libusb1_backend()
+backend = usb.backend.libusb1.get_backend()
+print(backend)
+breakpoint()
 
 class CaryFTIR:
     def __init__(self, dev: usb.core.Device, interface: int = 0):
@@ -180,6 +208,8 @@ def find_device(vendor_id: int, product_id: int) -> usb.core.Device:
             dev.detach_kernel_driver(0)
         dev.set_configuration()
         usb.util.claim_interface(dev, 0)
+        dev.set_configuration()
+        usb.util.claim_interface(dev, 0)
     return dev
 
 def run_measurement(
@@ -192,12 +222,6 @@ def run_measurement(
 ) -> None:
     dev = find_device(vendor_id, product_id)
     driver = CaryFTIR(dev)
-    for cfg in driver.dev:
-        for intf in cfg:
-            for ep in intf:
-                print(hex(ep.bEndpointAddress), ep.bmAttributes)
-    print("OOOOOOOOOOOOOOOOOOOOOOOOOOO")
-
     driver.reset_link()
     driver.query_version()
     counters = driver.query_runtime_counters()
