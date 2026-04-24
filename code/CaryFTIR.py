@@ -44,13 +44,11 @@ BULK_IN_PRIMARY = 0x83
 BULK_IN_SECONDARY = 0x85
 
 backend = usb.backend.libusb1.get_backend()
-print(backend)
-breakpoint()
 
 class CaryFTIR:
     def __init__(self, dev: usb.core.Device, interface: int = 0):
         self.dev = dev
-        self.sequence = 0
+        self.sequence = -1
         self.log = logging.getLogger("CaryFTIR")
         self.interface =  interface
 
@@ -76,7 +74,7 @@ class CaryFTIR:
     ) -> bytes:
         seq = self._next_sequence()
         dword0 = (pipe_id << 24) | (0x00 << 16) | (seq << 8) | frame_type
-        dword1 = (flags << 24) | ((payload_len & 0xFF) << 16) | (status << 8) | command
+        dword1 = (flags << 24) | ((payload_len & 0xFF) << 16) |(status << 8)  | command
         header = struct.pack("<IIII", dword0, dword1, param0, param1)
         return header
     
@@ -142,7 +140,8 @@ class CaryFTIR:
             param0=param0,
             param1=param1,
         )
-        self._write(BULK_OUT_EP, header + payload)
+        zeros_trail = b"\x00" * (48 - len(payload))
+        self._write(BULK_OUT_EP, header + payload + zeros_trail)
 
     # Intial step of the hand shake, just an empty payload starting with 0x0d
     def reset_link(self) -> None:
@@ -164,22 +163,50 @@ class CaryFTIR:
         """Send cmd=0x01 and return (family, status_flags)."""
         self.send_frame(0x08, 0x01, param0=0x00002A01)
         frame = self._recv_frame()
-        if frame.status != 0x40 or frame.command != 0x01:
+        if frame.command != 0x01:
             raise IOError(f"version query failed: {frame}")
         family = frame.param0
         self.log.info("Instrument family 0x%08x", family)
+        print(family)
         return family, frame.flags
+    
+    def cmd_19(self) -> None:
+        self.send_frame(0x08, 0x19)
+        frame = self._recv_frame()
+        if frame.command != 0x19:
+            raise IOError(f"Command 19 failed: {frame}")
+        self.log.info("Command 19 works")
     
     def query_runtime_counters(self) -> Tuple[int, int]:
         """Send cmd=0x68 and return the 24-bit counters from the payload."""
         self.send_frame(0x08, 0x68)
         frame = self._recv_frame()
-        if frame.command != 0x68 or frame.status != 0x40:
+        if frame.command != 0x68:
             raise IOError(f"counter query failed: {frame}")
         # Counters arrive as 0x10 payload bytes; pack them from the payload.
         left = struct.unpack_from("<I", frame.payload, 0)[0] & 0x00FFFFFF
         right = struct.unpack_from("<I", frame.payload, 4)[0] & 0x00FFFFFF
         return left, right
+    
+    def read_register(self) -> None:
+        """
+        Read register data using command 0x18. The firmware requires `param0 = addr << 8`.
+        Collects the follow-up type 0x18 fragments from the secondary pipe.
+        """
+        self.send_frame(0x08, 0x18, param0=0x40 << 16)
+        ack = self._recv_frame()
+        if ack.command != 0x00 or ack.payload_len != 0x01:
+            raise IOError(f"register read failed: {ack}")
+        # data = bytearray(ack.payload)
+        # Additional pages arrive on pipe 0x1C / endpoint 0x85 as type 0x18.
+        # while len(data) < length:
+        #     frame = self._recv_frame(endpoint=BULK_IN_SECONDARY)
+        #     if frame.type != 0x18:
+        #         self.log.warning("Unexpected frame while reading register: %s", frame)
+        #         continue
+        #     data.extend(frame.payload)
+        # return bytes(data[:length])
+        self._recv_frame()
 
 def parse_args(argv: List[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run a Cary FTIR measurement using pyusb.")
@@ -224,8 +251,11 @@ def run_measurement(
     driver = CaryFTIR(dev)
     driver.reset_link()
     driver.query_version()
+    driver.cmd_19()
     counters = driver.query_runtime_counters()
+    driver.read_register()
     logging.info("Runtime counters: %s", counters)
+    driver._recv_frame(endpoint=BULK_IN_SECONDARY)
 
     # profile = driver.request_profile_block(0x0C00, 0x0100)
     # logging.info("Profile digest: %s", profile[:16].hex())
