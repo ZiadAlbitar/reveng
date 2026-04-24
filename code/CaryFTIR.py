@@ -43,7 +43,7 @@ BULK_OUT_EP = 0x04
 BULK_IN_PRIMARY = 0x83
 BULK_IN_SECONDARY = 0x85
 
-backend = usb.backend.libusb1.get_backend()
+
 
 class CaryFTIR:
     def __init__(self, dev: usb.core.Device, interface: int = 0):
@@ -167,7 +167,6 @@ class CaryFTIR:
             raise IOError(f"version query failed: {frame}")
         family = frame.param0
         self.log.info("Instrument family 0x%08x", family)
-        print(family)
         return family, frame.flags
     
     def cmd_19(self) -> None:
@@ -188,14 +187,14 @@ class CaryFTIR:
         right = struct.unpack_from("<I", frame.payload, 4)[0] & 0x00FFFFFF
         return left, right
     
-    def read_register(self) -> None:
+    def read_register(self, address: int) -> None:
         """
         Read register data using command 0x18. The firmware requires `param0 = addr << 8`.
         Collects the follow-up type 0x18 fragments from the secondary pipe.
         """
-        self.send_frame(0x08, 0x18, param0=0x40 << 16)
+        self.send_frame(0x08, 0x18, param0=(address << 16))
         ack = self._recv_frame()
-        if ack.command != 0x00 or ack.payload_len != 0x01:
+        if ack.command != 0x00:
             raise IOError(f"register read failed: {ack}")
         # data = bytearray(ack.payload)
         # Additional pages arrive on pipe 0x1C / endpoint 0x85 as type 0x18.
@@ -206,7 +205,7 @@ class CaryFTIR:
         #         continue
         #     data.extend(frame.payload)
         # return bytes(data[:length])
-        self._recv_frame()
+        frame = self._recv_frame(endpoint=BULK_IN_SECONDARY)
 
 def parse_args(argv: List[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run a Cary FTIR measurement using pyusb.")
@@ -227,14 +226,12 @@ def configure_logging(verbose: bool) -> None:
     logging.basicConfig(level=level, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
         
 def find_device(vendor_id: int, product_id: int) -> usb.core.Device:
-    dev = usb.core.find(idVendor=vendor_id, idProduct=product_id, backend=backend)
+    dev = usb.core.find(idVendor=vendor_id, idProduct=product_id)
     if not isinstance(dev, usb.core.Device):
         raise IOError(f"Device VID=0x{vendor_id:04x} PID=0x{product_id:04x} not found")
     if os.name == "posix":
         if dev.is_kernel_driver_active(0):
             dev.detach_kernel_driver(0)
-        dev.set_configuration()
-        usb.util.claim_interface(dev, 0)
         dev.set_configuration()
         usb.util.claim_interface(dev, 0)
     return dev
@@ -253,9 +250,9 @@ def run_measurement(
     driver.query_version()
     driver.cmd_19()
     counters = driver.query_runtime_counters()
-    driver.read_register()
+    driver.read_register(0x40)
+    driver.read_register(0x20)
     logging.info("Runtime counters: %s", counters)
-    driver._recv_frame(endpoint=BULK_IN_SECONDARY)
 
     # profile = driver.request_profile_block(0x0C00, 0x0100)
     # logging.info("Profile digest: %s", profile[:16].hex())
