@@ -35,7 +35,7 @@ import sys
 import argparse
 import usb.backend.libusb1
 
-DEFAULT_TIMEOUT_MS = 2_000
+DEFAULT_TIMEOUT_MS = 5_000
 MAX_PACKET = 512
 
 # Default endpoints for the instrument (see docs/usb-protocol.md).
@@ -97,9 +97,40 @@ class CaryFTIR:
         data = bytes(self.dev.read(endpoint, MAX_PACKET, timeout=timeout))
         self.log.debug("USB IN  %s", data.hex())
         return data
+    
+    def _read_secondary(self, endpoint: int = BULK_IN_SECONDARY, timeout: int = DEFAULT_TIMEOUT_MS) -> bytes:
+        # Logging debug info
+        # reading from machine
+        print(BULK_IN_SECONDARY)
+        data = bytes(self.dev.read(endpoint, MAX_PACKET, timeout=timeout))
+        self.log.debug("USB IN  %s", data.hex())
+        return data
     # receives a frame 
     def _recv_frame(self, endpoint: int = BULK_IN_PRIMARY, timeout: int = DEFAULT_TIMEOUT_MS) -> Frame:
         raw = self._read(endpoint, timeout)
+        # Frames can't be shorter than header, but sometimes frames are empty, mabybe this breaks that?
+        if len(raw) < 16:
+            raise IOError("response shorter than header")
+        # Unpack the header
+        d0, d1, param0, param1 = struct.unpack("<IIII", raw[:16])
+        frame = Frame(
+            type=d0 & 0xFF,
+            sequence=(d0 >> 8) & 0xFFFF,
+            pipe_id=(d0 >> 24) & 0xFF,
+            command=d1 & 0xFF,
+            status=(d1 >> 8) & 0xFF,
+            payload_len=(d1 >> 16) & 0xFF,
+            flags=(d1 >> 24) & 0xFF,
+            param0=param0,
+            param1=param1,
+            payload=raw[16:],
+        )
+        return frame
+    
+    def _recv_measure_frame(self, endpoint: int = BULK_IN_SECONDARY, timeout: int = DEFAULT_TIMEOUT_MS) -> Frame:
+        print("innan read")
+        raw = self._read_secondary()
+        print("efter read")
         # Frames can't be shorter than header, but sometimes frames are empty, mabybe this breaks that?
         if len(raw) < 16:
             raise IOError("response shorter than header")
@@ -207,6 +238,85 @@ class CaryFTIR:
         # return bytes(data[:length])
         frame = self._recv_frame(endpoint=BULK_IN_SECONDARY)
 
+
+    def cmd_b2(self) -> None:
+        self.send_frame(0x08, 0xb2, pipe_id=0x30)
+        frame = self._recv_frame()
+        if frame.command != 0xb2:
+            raise IOError(f"Command b2 failed: {frame}")
+        self.log.info("Command b2 works")
+
+    def cmd_copy(self, command: int, param0: int=0, param1: int=0, payload="") -> None:
+        self.send_frame(
+            0x08, 
+            command=command, 
+            pipe_id=0x30, 
+            param0=param0,
+            param1=param1,
+            # fromhex() städar bort mellanslag och gör om till riktiga bytes
+            payload=bytes.fromhex(payload) 
+        )
+        frame = self._recv_frame()
+        if frame.command != command:
+            raise IOError(f"Command {command} copy failed: {frame}")
+        self.log.info(f"Command {command} copy works with payload: {payload}")
+        
+
+
+    def cmd_b4(self) -> None:
+        hex_data = "00 00 00 00 00 31 00 00 00 01 00 41 00 00 00 01 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+
+        self.send_frame(
+            0x08, 
+            0xb4, 
+            pipe_id=0x1c, 
+            param0=0x00000c00, 
+            param1=0x00000100, 
+            # fromhex() städar bort mellanslag och gör om till riktiga bytes
+            payload=bytes.fromhex(hex_data) 
+        )
+        frame = self._recv_frame()
+        if frame.command != 0xb4:
+            raise IOError(f"Command b4 failed: {frame}")
+        self.log.info("Command b4 works")
+    
+    def cmd_60(self) -> None:
+        self.send_frame(0x08, 0x60)
+        frame = self._recv_frame()
+        if frame.command != 0x60:
+            raise IOError(f"Command 60 failed: {frame}")
+        self.log.info("Command 60 works")
+
+    def cmd_61(self) -> None:
+        self.send_frame(0x08, 0x61)
+        frame = self._recv_frame()
+        if frame.command != 0x61:
+            raise IOError(f"Command 61 failed: {frame}")
+        self.log.info("Command 61 works")
+
+    def cmd_62(self) -> None:
+        self.send_frame(0x08, 0x62, param0=0x10000000)
+        frame = self._recv_frame()
+        if frame.command != 0x62:
+            raise IOError(f"Command 62 failed: {frame}")
+        self.log.info("Command 62 works")
+
+    def cmd_63(self) -> None:
+        self.send_frame(0x08, 0x63)
+        frame = self._recv_frame()
+        if frame.command != 0x63:
+            raise IOError(f"Command 63 failed: {frame}")
+        self.log.info("Command 63 works")
+
+    def cmd_64(self) -> None:
+        self.send_frame(0x08, 0x64)
+        frame = self._recv_frame()
+        # if frame.command != 0x00 or frame.pipe_id != 0x04:
+        #     raise IOError(f"Command 64 failed: {frame}")
+        self.log.info("Command 64 works")
+        self._recv_measure_frame()
+        print("get measurement work")
+
 def parse_args(argv: List[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run a Cary FTIR measurement using pyusb.")
     parser.add_argument("--vid", type=lambda x: int(x, 0), default=4020, help="USB vendor ID (e.g. 0x0957)")
@@ -254,6 +364,28 @@ def run_measurement(
     driver.read_register(0x20)
     logging.info("Runtime counters: %s", counters)
 
+    # driver.cmd_63()
+    # driver.cmd_62()
+    # driver.cmd_64()
+    
+    # breakpoint()
+    # for i in range (1, 10):
+    #     driver.cmd_60()
+    
+    # driver.cmd_b4()
+    # driver.cmd_copy(0xb2, param0=0x19700000, payload="000000002482587798de0d1500000d15247a811518000000d007ee0f64000000889b0d15000000000000000000000000")
+    # driver.cmd_copy(0xb2, param0=0x39700000, payload="000000000000016000303935353333000000000000050000022401000991100000060151000000000000000000000000")
+    # driver.cmd_copy(0xb2, param0=0x49700000, payload="000000000000010100303935353333000000000000050000022401000991100000060151000000000000000000000000")
+    # driver.cmd_copy(0xb2, param0=0x19800000, payload="000000000000010b00303935353333000000000000050000022401000991100000060151000000000000000000000000")
+    # driver.cmd_copy(0xb2, param0=0x39190000, payload="000000000000001400303935353333000000000000050000022401000991100000060151000000000000000000000000")
+    # driver.cmd_copy(0xb2, param0=0x49100000, payload="000000000b0b030000303935353333000000000000050000022401000991100000060151000000000000000000000000")
+    # driver.cmd_copy(0xb2, param0=0x2e100000, payload="0000000009ffffff00303935353333000000000000050000022401000991100000060151000000000000000000000000")
+    # driver.cmd_copy(0xb2, param0=0x0e130000, payload="000000004d59323434364355313400000000000000050000022401000991100000060151000000000000000000000000")
+    # driver.cmd_copy(0xb2, param0=0x1e130000, payload="000000003030323300364355313400000000000000050000022401000991100000060151000000000000000000000000")
+    # driver.cmd_copy(0xb2, param0=0x2e130000, payload="000000003030343700364355313400000000000000050000022401000991100000060151000000000000000000000000")
+    # driver.cmd_copy(0xb2, param0=0x3e100000, payload="000000003031313300364355313400000000000000050000022401000991100000060151000000000000000000000000")
+    # driver.cmd_copy(0xb2, param0=0x4e100000, payload="000000003000313300364355313400000000000000050000022401000991100000060151000000000000000000000000")
+    
     # profile = driver.request_profile_block(0x0C00, 0x0100)
     # logging.info("Profile digest: %s", profile[:16].hex())
 
