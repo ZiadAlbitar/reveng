@@ -1,148 +1,114 @@
-from data import get_data
-from matplotlib import pyplot as plt
 import numpy as np
+from matplotlib import pyplot as plt
+import scienceplots 
+
+from scipy.signal import savgol_filter
+import pandas as pd
+
+# Assuming these are available in your local environment
+from confsmooth import confsmooth
+from data import get_data, resample
 from FTIR import *
-from scipy.interpolate import interp1d
-
-def get_wavenumbers(num_points, lambda_hene_nm=632.8):
-    # 1. Delta OPD in cm
-    delta_opd = (lambda_hene_nm * 1e-7) / 2
-    
-    # 2. Nyquist Frequency (cm^-1)
-    nyquist = 1 / (2 * delta_opd)
-    
-    # 3. Create the wavenumber axis for the first half of the FFT
-    # num_points here should be the length of your FFT (e.g., 512)
-    wavenumbers = np.linspace(0, nyquist, num_points)
-    
-    return wavenumbers
-
-def phase_corrected(spectra, phase):
-    """
-    Applies Mertz phase correction.
-    spectra: The complex FFT result of the full interferogram.
-    phase: The interpolated phase map from the short scan.
-    """
-    # Standard Mertz rotation: multiply by exp(-i * phase)
-    # This 'unwinds' the phase error
-    corrected_complex = spectra * np.exp(-1j * phase)
-    
-    # 2. Return the Real component
-    return corrected_complex
-
-def interpol(low_res, full_len):
-    x_old = np.linspace(0, 1, len(low_res))
-    
-    # 3. Create the new x-axis (normalized 0 to 1)
-    x_new = np.linspace(0, 1, full_len)
-    
-    # 4. Define the interpolation function (linear is standard for Mertz)
-    interpolator = interp1d(x_old, low_res, kind='linear', fill_value="extrapolate")
-    
-    # 5. Generate the stretched phase map
-    high_res_phase = interpolator(x_new)
-    
-    return high_res_phase
-
-def pipramp(interferogram):
-    """
-    Applies a Mertz ramp to handle the transition from 
-    double-sided to single-sided data.
-    """
-    # Use argmax(abs) to safely find ZPD regardless of polarity
-    zpd = np.argmax(np.abs(interferogram)) 
-    
-    # The double-sided region is 2 * zpd (from 0 to the mirror image of the left wing)
-    double_sided_len = zpd * 2
-    
-    # Create the ramp: 0 at start, 1 at the end of the double-sided region
-    ramp_segment = np.linspace(0, 1, double_sided_len)
-    
-    # Create a full-length array of 1s
-    full_ramp = np.ones(len(interferogram))
-    
-    # Overlay the ramp onto the beginning
-    # (If the interferogram is shorter than the segment, truncate the segment)
-    limit = min(len(full_ramp), double_sided_len)
-    full_ramp[:limit] = ramp_segment[:limit]
-    
-    return interferogram * full_ramp
 
 
+def get_phase_map(data):
+    centered = symmetrize(data, 512)
+    rotated = rotate(centered)
+    fft_phase = np.fft.fft(rotated)
+    phase = phase_angle(fft_phase)
+
+    return phase
+
+def get_fourier_transform(ref_laser, interferogram, zero_fill_factor = 1, window = 'hamming', spectral_resolution = 4.0):
+    clocked_ir = resample(interferogram, ref_laser)
+
+    meaned_interferogram = to_mean(clocked_ir)
+    apodized = apodize(meaned_interferogram, window, about = 'zpd')
+
+    pip = pipramp(apodized)
+    phase_map = get_phase_map(pip)
+
+
+    z_len = zero_fill(apodized, zero_fill_factor) # Usually doubles the length
+    padded = np.pad(pip, (0, z_len - len(pip)), mode='constant')
+
+    rot = rotate(padded)
+    fft_full = np.fft.fft(rot)
+
+    # ---------- Phase correction ----------
+    phase_interp = interpol(phase_map, z_len)
+    corrected = phase_corrected(fft_full, phase_interp)
+
+    h = len(corrected) // 2
+    waves = get_wavenumbers(h)
+
+    return waves, corrected[:h].real
+
+def get_absorbance(background, sample, waves):
+    bg_clean = np.maximum(background, 1e-6) # Avoid division by zero
+    sample_clean = np.maximum(sample, 1e-6)
+
+    # Thresholding to find the useful spectral range
+    threshold = 0.02 * np.max(bg_clean)
+    mask = bg_clean > threshold
+
+    # Calculate Absorbance ONLY within the mask to avoid the "zero-line"
+    transmittance = sample_clean[mask] / bg_clean[mask]
+    absorbance = -np.log10(transmittance)
+    waves_final = waves[mask]
+
+    # ---------- Smoothing ----------
+    # Window length must be odd
+    A_smoothed = savgol_filter(absorbance, window_length=11, polyorder=2)
+
+    return A_smoothed, waves_final
 
 if __name__ == "__main__":
-    PATH = "outputs/started_1_2_out.csv"
-    clocked_ir, _, __ = get_data(PATH)
+    PATH = "outputs/iso_prop_2.csv"
 
-    meaned = to_mean(clocked_ir)
+    # Load data
+    bg_laser, bg_ir = get_data(85679, num_packets= 458, PATH = PATH)
+    sample_laser, sample_ir = get_data(200531, num_packets= 458, PATH = PATH)
 
-    # pip ramp here
-    pip = pipramp(meaned)
+    waves_bg, background = get_fourier_transform(bg_laser, bg_ir)
+    waves_sm, sample = get_fourier_transform(sample_laser, sample_ir)
 
-    centered = symmetrize(pip, 512)
-    apodized = apodize(centered, 'hamming', about="zpd")
+    absorbance, waves = get_absorbance(background, sample, waves_sm)
 
-    rotated = rotate(apodized)
+    # ---------- Reference ----------
+    try:
+        df = pd.read_csv("reference/iso_propanol_reference.csv", sep=";", decimal=",")
+    except FileNotFoundError:
+        print("Reference file not found, skipping reference plot.")
+        df = None
 
-    zero_fill_factor = zero_fill(rotated)
+    
+    # ---------- Plot ----------
+    plt.style.use('.\\scienceplots\\science.mplstyle')
 
-
-    idk = np.fft.fft(rotated)
-    half_point = len(idk) // 2
-    final = np.abs(idk)
-
-    phase = phase_angle(idk)
-
-    wavenumbers = get_wavenumbers(512, 632.8)
-
-    corrected = phase_corrected(idk, phase)
-
-
-    # ____________________full interferogram________________________#
-    mean = to_mean(clocked_ir)
-    pip2 = pipramp(mean)
-    apo = apodize(pip2, 'hamming', about='zpd')
-    z = zero_fill(apo, 2)
-    padded = np.pad(apo, (0, z - len(apo)), mode='constant')
-    rot = rotate(padded)
-    f = np.fft.fft(rot)
-    h = len(f) // 2
-    print(z)
-    print(len(f))
-
-    interpolated = interpol(phase, z)
-    corr = phase_corrected(f,interpolated)
-
-    waves = get_wavenumbers(len(f)//2)
-
-    # plt.figure()
-    # plt.plot(wavenumbers, -idk.real, linewidth=0.5)
-    # plt.title("fft'd")
-    # plt.figure()
-    # plt.plot(wavenumbers, idk.imag, linewidth=0.5)
-    # plt.title("fft'd")
+    plt.figure(figsize=(10, 6))
+    plt.plot(resample(sample_ir, sample_laser))
+    plt.xlabel(r"Mirror position (mm)")
+    plt.ylabel(r"Intensity")
+    plt.title(r"Interferogram of Isopropanol")
+    plt.xlim(0, 1300)
 
 
-    # plt.figure()
-    # plt.plot(wavenumbers, phase, linewidth=0.5)
-    # plt.title("phase")
+    plt.figure(figsize=(10, 6))
+    plt.plot(waves, absorbance, linewidth=1.0, label=r"Raw Estimation", alpha=0.8)
 
-    # plt.figure()
-    # plt.plot(wavenumbers, corrected, linewidth=0.5)
-    # plt.title("corrected")
+    if df is not None:
+        plt.plot(df["Wavenumber"], df["Intensity"],
+                linewidth=1, label=r"Reference", alpha=0.7)
 
-    plt.figure()
-    plt.plot(waves, interpolated[:h], linewidth=0.5)
-    plt.title("interpolated phase")
+    plt.legend()
+    plt.ylim(-0.05, 0.6)
+    plt.xlim(4000, 650)
 
-    plt.figure()
-    plt.plot(waves, -f[:h].real, linewidth=0.5)
-    plt.xlim(400, 4000) # Standard IR view
-    plt.title("real")
+    plt.xlabel(r"Wavenumber ($\mathrm{cm}^{-1}$)")
+    plt.ylabel(r"Absorbance")
+    plt.title(r"Phase-corrected Isopropanol spectrum")
 
-    plt.figure()
-    plt.plot(waves, corr[:h].real, linewidth=0.5)
-    plt.xlim(400, 4000) # Standard IR view
-    plt.title("corrected")
+    plt.grid(True, which='both', linestyle='--', alpha=0.5)
 
     plt.show()
