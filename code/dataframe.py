@@ -18,6 +18,7 @@ class Frame:
             f"Frame(type=0x{self.type:02x}, seq={self.sequence}, pipe=0x{self.pipe_id:02x}, "
             f"cmd=0x{self.command:02x}, status=0x{self.status:02x}, flags=0x{self.flags:02x}, "
             f"len={self.payload_len}, param0=0x{self.param0:08x}, param1=0x{self.param1:08x})"
+            f"\npaylod={self.payload.hex(' ')}"
         )
 
 @dataclass
