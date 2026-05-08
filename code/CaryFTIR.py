@@ -78,12 +78,7 @@ class CaryFTIR:
         dword0 = (pipe_id << 24) | (0x00 << 16) | (seq << 8) | frame_type
         dword1 = (flags << 24) | ((payload_len & 0xFF) << 16) | (status << 8) | command
         header = struct.pack("<IIII", dword0, dword1, param0, param1)
-        return header
-    
-    def _build_measurement_header():
-        # The measurements have a different header
-        pass
-        
+        return header        
     
     def _write(self, endpoint: int, data: bytes) -> None:
         # Just logging debug info
@@ -99,6 +94,7 @@ class CaryFTIR:
         data = bytes(self.dev.read(endpoint, MAX_PACKET, timeout=timeout))
         self.log.debug("USB IN  %s", data.hex())
         return data
+    
     # receives a frame 
     def _recv_frame(self, endpoint: int = BULK_IN_PRIMARY, timeout: int = DEFAULT_TIMEOUT_MS) -> Frame:
         raw = self._read(endpoint, timeout)
