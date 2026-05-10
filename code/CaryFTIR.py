@@ -37,6 +37,7 @@ import usb.backend.libusb1
 
 DEFAULT_TIMEOUT_MS = 5_000
 MAX_PACKET = 512
+MAX_PRIMARY_PACKET = 64
 
 # Default endpoints for the instrument (see docs/usb-protocol.md).
 BULK_OUT_EP = 0x04
@@ -156,6 +157,7 @@ class CaryFTIR:
         flags: int = 0,
         param0: int = 0,
         param1: int = 0,
+        frame_len : int = 64
     ) -> None:
         p_len = len(payload)
         header = self._build_header(
@@ -169,20 +171,18 @@ class CaryFTIR:
             param1=param1,
         )
         # TODO: This is hardcoded
-        zeros_trail = b"\x00" * (48 - len(payload))
+        zeros_trail = b"\x00" * (frame_len - 16 - len(payload))
 
         self._write(endpoint, header + payload + zeros_trail)
 
     # Intial step of the hand shake, just an empty payload starting with 0x0d
     def reset_link(self) -> None:
         """
-        Issue the link reset (type 0x0D). The capture shows 64 zero bytes,
-        so we replicate that padding.
+        Issue the link reset (type 0x0D).
         """
         seq = self._next_sequence()
         dword0 = (0x00 << 16) | (seq << 8) | 0x0D
-        reset_packet = struct.pack("<I", dword0) + b"\x00" * 60
-        self._write(BULK_OUT_EP, reset_packet)
+        self.send_frame(BULK_OUT_EP, 0x0d, 0x00)
         frame = self._recv_frame()
         # Check if received frame looks right
         if frame.type != 0x0D or frame.command != 0x07:
@@ -354,31 +354,37 @@ def find_device(vendor_id: int, product_id: int) -> usb.core.Device:
         usb.util.claim_interface(dev, 0)
     return dev
 
-def run_measurement(
-    vendor_id: int,
-    product_id: int,
-    start_cm: float,
-    stop_cm: float,
-    resolution: int,
-    output: Optional[str],
-) -> None:
+def connect(vendor_id: int, product_id: int) -> None:
+    """ Connects to device and performs the intial handshake """
     dev = find_device(vendor_id, product_id)
     driver = CaryFTIR(dev)
     driver.reset_link()
     driver.query_version()
     driver.cmd_19()
     counters = driver.query_runtime_counters()
+    logging.info("Runtime counters: %s", counters)
     driver.read_register(0x40)
     driver.read_register(0x20)
-    logging.info("Runtime counters: %s", counters)
+
+def run_measurement(
+    start_cm: float,
+    stop_cm: float,
+    resolution: int,
+    output: Optional[str],
+) -> None:
+    pass
 
 def main(argv: List[str]) -> None:
     args = parse_args(argv)
     configure_logging(args.verbose)
+    
+    try: 
+        connect(args.vid, args.pid)
+    except Exception as exc:
+        logging.error("Connection or handshake failed: %s", exc, exc_info=args.verbose)
+
     try:
         run_measurement(
-            vendor_id=args.vid,
-            product_id=args.pid,
             start_cm=args.start,
             stop_cm=args.stop,
             resolution=args.resolution,
