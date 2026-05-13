@@ -41,10 +41,15 @@ MAX_PRIMARY_PACKET = 64
 
 # Default endpoints for the instrument (see docs/usb-protocol.md).
 BULK_OUT_EP = 0x04
-BULK_OUT_PARA = 0x06
+BULK_OUT_PARAM = 0x06
 BULK_IN_PRIMARY = 0x83
 BULK_IN_SECONDARY = 0x85
 
+# States
+SETUP = 0
+CLEAN_PLATE = 1
+BACKGROUND_SCAN = 2
+MEASUREMENT = 3
 
 
 class CaryFTIR:
@@ -53,6 +58,7 @@ class CaryFTIR:
         self.sequence = -1
         self.log = logging.getLogger("CaryFTIR")
         self.interface =  interface
+        self.state = SETUP
 
     # ------------------------------------------------------------------ #
     # USB helpers
@@ -144,7 +150,7 @@ class CaryFTIR:
         )
         return frame
 
-    def _send_frame(
+    def send_frame(
         self,
         endpoint: int,
         frame_type: int,
@@ -203,7 +209,7 @@ class CaryFTIR:
     def send_param(self) -> None:
         hex_data = "01 01 00 00 00 04 01 11 00 00 02 00 01 21 00 00 00 80 01 31 00 00 00 c8 01 41 00 00 00 04 31 01 00 00 00 01 31 11 00 00 00 00 31 21 00 00 00 00 31 31 00 00 00 01 31 41 00 00 00 01"
         self.send_frame(
-            BULK_OUT_PARA,
+            BULK_OUT_PARAM,
             0xb4, 
             0x00, 
             pipe_id=0x00, 
@@ -238,46 +244,53 @@ class CaryFTIR:
             raise IOError(f"Command b4 failed: {frame}")
         self.log.info("Command b4 succeeded")
     
-    def cmd_60(self) -> None:
-        self.send_frame(0x08, 0x60)
-        frame = self._recv_frame()
-        if frame.command != 0x60:
-            raise IOError(f"Command 60 failed: {frame}")
-        self.log.info("Command 60 succeeded")
 
-    def cmd_61(self) -> None:
-        self.send_frame(0x08, 0x61)
+    def exchange_frame(
+        self,
+        endpoint: int,
+        frame_type: int,
+        pipe_id: int,
+        command: int,
+        flags: int = 0,
+        param0: int = 0,
+        param1: int = 0,
+        payload: bytes = b'',
+        expected_command: Optional[object] = None,
+        ) -> Frame:
+        if isinstance(payload, bytes):
+            payload_bytes = payload
+        else:
+            # fromhex() städar bort mellanslag och gör om till riktiga bytes
+            payload_bytes = bytes.fromhex(str(payload))
+        self.send_frame(
+            endpoint=endpoint,
+            frame_type=frame_type,
+            pipe_id=pipe_id,
+            command=command,
+            flags=flags,
+            param0=param0,
+            param1=param1,
+            payload=payload_bytes
+        )
         frame = self._recv_frame()
-        if frame.command != 0x61:
-            raise IOError(f"Command 61 failed: {frame}")
-        self.log.info("Command 61 succeeded")
-
-    def cmd_62(self) -> None:
-        self.send_frame(0x08, 0x62, param0=0x10000000)
-        frame = self._recv_frame()
-        if frame.command != 0x62:
-            raise IOError(f"Command 62 failed: {frame}")
-        self.log.info("Command 62 succeeded")
-
-    def cmd_63(self) -> None:
-        self.send_frame(0x08, 0x63)
-        frame = self._recv_frame()
-        if frame.command != 0x63:
-            raise IOError(f"Command 63 failed: {frame}")
-        self.log.info("Command 63 succeeded")
-
-    def cmd_64(self) -> None:
-        self.send_frame(0x08, 0x64)
-        frame = self._recv_frame()
-        self.log.info("Command 64 succeeded")
-        self._recv_measure_frame()
+        if expected_command is None:
+            expected_command = 0xb3 if frame_type == 0x0a and command == 0x00 else command
+        if isinstance(expected_command, int):
+            expected_commands = (expected_command,)
+        else:
+            expected_commands = tuple(expected_command)
+        if frame.command not in expected_commands:
+            expected_hex = ", ".join(f"0x{cmd:02x}" for cmd in expected_commands)
+            raise IOError(f"Command 0x{command:02x} expected {expected_hex} but got: {frame}")
+        self.log.info(f"Command {command} copy works with payload: {payload_bytes.hex()}")
+        return frame 
     
     # ------------------------------------------------------------------ #
     # High-level functions
     # ------------------------------------------------------------------ #
     def establish_connection(self, vendor_id: int, product_id: int):
         """ Connects to device and performs the intial handshake """
-        def _find_device(vendor_id: int, product_id: int) -> None:
+        def find_device(vendor_id: int, product_id: int) -> None:
             dev = usb.core.find(idVendor=vendor_id, idProduct=product_id)
             if not isinstance(dev, usb.core.Device):
                 raise IOError(f"Device VID=0x{vendor_id:04x} PID=0x{product_id:04x} not found")
@@ -288,7 +301,7 @@ class CaryFTIR:
                 usb.util.claim_interface(dev, 0)
         
             # Intial step of the hand shake, just an empty payload starting with 0x0d
-        def _reset_link(driver: CaryFTIR) -> None:
+        def reset_link(driver: CaryFTIR) -> None:
             """
             Issue the link reset (type 0x0D).
             """
@@ -302,7 +315,7 @@ class CaryFTIR:
             driver.log.info("Link reset acknowledged: %s", frame)
 
         
-        def _query_version(driver: CaryFTIR) -> Tuple[int, int]:
+        def query_version(driver: CaryFTIR) -> Tuple[int, int]:
             """Send cmd=0x01 and return (family, status_flags)."""
             driver.send_frame(BULK_OUT_EP, 0x08, 0x01, param0=0x00002A01)
             frame = driver._recv_frame()
@@ -312,14 +325,14 @@ class CaryFTIR:
             driver.log.info("Instrument family 0x%08x", family)
             return family, frame.flags
 
-        def _cmd_19(driver: CaryFTIR) -> None:
+        def cmd_19(driver: CaryFTIR) -> None:
             driver.send_frame(BULK_OUT_EP, 0x08, 0x19)
             frame = driver._recv_frame()
             if frame.command != 0x19:
                 raise IOError(f"Command 19 failed: {frame}")
             driver.log.info("Command 19 succeded")
 
-        def _query_runtime_counters(driver: CaryFTIR) -> Tuple[int, int]:
+        def query_runtime_counters(driver: CaryFTIR) -> Tuple[int, int]:
             """Send cmd=0x68 and return the 24-bit counters from the payload."""
             driver.send_frame(BULK_OUT_EP, 0x08, 0x68)
             frame = driver._recv_frame()
@@ -330,11 +343,11 @@ class CaryFTIR:
             right = struct.unpack_from("<I", frame.payload, 4)[0] & 0x00FFFFFF
             return left, right
     
-        _find_device(self, vendor_id, product_id)
-        _reset_link()
-        _query_version(self)
-        _cmd_19(self)
-        counters = _query_runtime_counters(self)
+        find_device(self, vendor_id, product_id)
+        reset_link()
+        query_version(self)
+        cmd_19(self)
+        counters = query_runtime_counters(self)
         logging.info("Runtime counters: %s", counters)
     
     
@@ -343,9 +356,125 @@ class CaryFTIR:
         self.read_register(0x20)
 
         def chain_b2(param0: int, payload: bytes) -> bytes:
-            self.send_frame(BULK_OUT_EP, 0x08, 0x30, 0xb2, 0x00, param0, 0x00000000, payload)
-            frame = self._recv_frame()
-            return frame
+            frame = self.exchange_frame(BULK_OUT_EP, 0x08, 0x30, 0xb2, 0x00, param0, 0x00000000, payload)
+            return frame.payload
+        def chain_b3(param0: int, param1: int, payload: bytes) -> bytes:
+            frame = self.exchange_frame(BULK_OUT_EP, 0x08, 0x30, 0xb3, 0x00, param0, param1, payload)
+            return frame.payload
+        
+        self.exchange_frame(BULK_OUT_EP, 0x08, 0x1c, 0xb4, 0x00, 0x00000c00, 0x00000100, '000000000031000000010041000000010000000000000000000000000000000000000000000000000000000000000000')
+        
+        payload = bytes.fromhex('0000000044823a7718e0ec150000ec15247a641618000000d007f00f64000000e09cec15000000000000000000000000')
+        payload = chain_b2(0x19700000, payload)
+
+        for param0 in (
+        0x39700000, 0x49700000, 0x19800000, 0x39100000, 0x49100000,
+        0x2e100000, 0x0e130000, 0x1e130000, 0x2e130000, 0x3e130000,
+        0x4e130000, 0x5e130000, 0x6e130000):
+            payload = chain_b2(param0, payload)
+
+        payload = bytes.fromhex('00000000d8c2ec15a4166c10ab166c1084e64f0178298e10e8298e100000000005000000000000000000000000000000')
+        payload = chain_b2(0x09110000, payload)
+        for param0 in (
+            0x01110000, 0x11110000, 0x21110000, 0x31110000, 0x44110000,
+            0x54310000, 0x94310000, 0x84310000,):
+            payload = chain_b2(param0, payload)
+            
+        payload = bytes.fromhex('000000010000000435333300000000000000000000000000000000000000000030323134000000000000000000000000')
+        self.exchange_frame(BULK_OUT_EP, 0x08, 0x30, 0xb3, 0x00, 0x4110,  0x00000400, payload)
+        self.exchange_frame(BULK_OUT_EP, 0x0a, 0x04, 0x00, 0x4c, 0x0000,  0x00000400)
+        self.send_param()
+
+        self.exchange_frame(BULK_OUT_EP, 0x08, 0x30, 0xb3, 0x00, 0x41100000, 0x00000400, '000000010000000435333300000000000000000000000000000000000000000030323134000000000000000000000000')
+        self.exchange_frame(BULK_OUT_EP, 0x0a, 0x04, 0x00, 0x4c, 0x00000000, 0x00000000, '000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000')
+        self.send_param()
+        self.exchange_frame(BULK_OUT_EP, 0x08, 0x30, 0xb3, 0x00, 0x31020000, 0x00000400, '00000000000000000000000084e64f01894e6c10cc0c0000d8e36b10ffffffff78298e10000000000000000000000000')
+        self.exchange_frame(BULK_OUT_EP, 0x08, 0x30, 0xb3, 0x00, 0x41020000, 0x00000400, '000000000000000000303935353333000000000004051000022401000991108000060141000000000000000000000000')
+        self.exchange_frame(BULK_OUT_EP, 0x08, 0x30, 0xb3, 0x00, 0x21020000, 0x00000400, '000000010000000000303935353333000000000004051000022401000991108000060141000000000000000000000000')
+        payload = chain_b2(0x11020000, bytes.fromhex('0000000030000000040000000100000078298e101b36e90f000000000000000000000000000000000000000000000000'))
+        payload = chain_b3(0x11020000, 0x00000400, payload)
+        self.exchange_frame(BULK_OUT_EP, 0x08, 0x10, 0x69, 0x00, 0x01000000, 0x00000000, '00' * 48)
+        self.exchange_frame(BULK_OUT_EP, 0x08, 0x1c, 0xb4, 0x00, 0x00000c00, 0x00000300, '000000000031000000020041000000010000000000000000000000000000000000000000000000000000000000000000')
+        self.exchange_frame(BULK_OUT_EP, 0x08, 0x24, 0x15, 0x08, 0x00000110, 0x04000400, '00' * 48)
+        self.exchange_frame(BULK_OUT_EP, 0x08, 0x30, 0xb3, 0x00, 0xa1310000, 0x00000400, '00000001000000000000000084e64f01894e6c10cc0c000056836c10ffffffff78298e10000000000000000000000000')
+        self.exchange_frame(BULK_OUT_EP, 0x08, 0x30, 0xb3, 0x00, 0xc1310000, 0x00000400, '000000010000000200303935353333000000000004051000022401000991108000060141000000000000000000000000')
+
+        payload = chain_b2(0x09110000, bytes.fromhex('00000000c402000018e54f01f63e367718e5ec1578298e10389b64030000000030e54f01000000000000000000000000'))
+        for param0 in (
+            0x01110000, 0x11110000, 0x21110000, 0x31110000, 0x44110000,
+            0x54310000, 0x94310000, 0x84310000,
+        ):
+            payload = chain_b2(param0, payload)
+        self.exchange_frame(BULK_OUT_EP, 0x08, 0x10, 0xb6, 0x00, 0x00000000, 0x00000400, '000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000')
+
+        for _ in range(7):
+            self.exchange_frame(BULK_OUT_EP, 0x08, 0x10, 0xb5, 0x00, 0x00000000, 0x00000400, '000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000')
+            self.exchange_frame(BULK_OUT_EP, 0x08, 0x10, 0x60, 0x00, 0x00000000, 0x00000000, '000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000')
+        payload = chain_b2(0x09110000, bytes.fromhex('00000000df557576640000000000000013c96b1027c96b10944070100000000098c1ec15000000000000000000000000'))
+
+        for param0 in (
+            0x19110000, 0x01110000, 0x61110000, 0x71110000, 0x81110000,
+            0x91110000, 0x54310000, 0x94310000, 0x84310000, 0x01130000,
+            0x51130000, 0x61130000, 0x11130000, 0x24140000, 0x64140000,
+            0x34140000, 0x74140000, 0x44140000, 0x84140000,
+        ):
+            payload = chain_b2(param0, payload)
+
+
+    def run_measurement(
+        self,
+        start_cm: float,
+        stop_cm: float,
+        resolution: int,
+        output: Optional[str],
+    ) -> None:
+        
+        pass
+
+    def get_measurement(self):
+        logging.info("Starting measurement sequence")
+        profile_dump = self.start_measurement_stream(pre_measure_polls=pre_measure_polls, poll_delay=poll_delay)
+        logging.info("Read %d profile/config packets before acquisition", len(profile_dump))
+        frame_count, byte_count = driver.read_measurement_stream(
+            duration=data_seconds,
+            max_frames=max_data_frames,
+            output=output,
+        )
+        if output:
+            logging.info("Captured %d data packets (%d bytes) to %s", frame_count, byte_count, output)
+        else:
+            logging.info("Captured %d data packets (%d bytes); use --out to save them", frame_count, byte_count)
+
+        if plot_enabled and output and frame_count:
+            if plot_output:
+                plot_path = plot_output
+            else:
+                stem, _ = os.path.splitext(output)
+                plot_path = f"{stem}_plot.png"
+            try:
+                logging.info("Plotting measurement from %s to %s (show_plot=%s)", output, plot_path, show_plot)
+                plot_stats = plot_measurement_file(output, plot_path, show_plot)
+                logging.info("Plotted measurement to %s (%s)", plot_path, plot_stats)
+            except ModuleNotFoundError as exc:
+                missing = exc.name or str(exc)
+                logging.error(
+                    "Plotting failed because Python package '%s' is not installed. "
+                    "Install plotting dependencies with: python -m pip install numpy matplotlib",
+                    missing,
+                    exc_info=True,
+                )
+            except Exception as exc:  # pylint: disable=broad-except
+                logging.error("Plotting failed: %s", exc, exc_info=True)
+        elif plot_enabled and not output:
+            logging.warning("Skipping plot because no --out file was provided")
+
+    
+
+        
+
+        
+            
+
 
 def parse_args(argv: List[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run a Cary FTIR measurement using pyusb.")
@@ -366,15 +495,6 @@ def configure_logging(verbose: bool) -> None:
     logging.basicConfig(level=level, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     
 
-
-def run_measurement(
-    start_cm: float,
-    stop_cm: float,
-    resolution: int,
-    output: Optional[str],
-) -> None:
-    pass
-
 def main(argv: List[str]) -> None:
     args = parse_args(argv)
     configure_logging(args.verbose)
@@ -389,7 +509,7 @@ def main(argv: List[str]) -> None:
         driver.param_config(args.vid, args.pid)
     except Exception as exc:
         logging.error("Connection or handshake failed: %s", exc, exc_info=args.verbose)
-
+    
     try:
         run_measurement(
             start_cm=args.start,
