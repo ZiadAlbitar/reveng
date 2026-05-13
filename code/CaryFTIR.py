@@ -24,20 +24,25 @@ Requires:
 
 
 
+import time
+
 import usb.util
 import usb.core
 import struct
 import logging
 from typing import Optional, Tuple, List
-from dataframe import Frame
+from dataframe import Frame, Settings
 import os
 import sys
 import argparse
 import usb.backend.libusb1
+from dataclasses import dataclass
+
 
 DEFAULT_TIMEOUT_MS = 5_000
 MAX_PACKET = 512
 MAX_PRIMARY_PACKET = 64
+
 
 # Default endpoints for the instrument (see docs/usb-protocol.md).
 BULK_OUT_EP = 0x04
@@ -51,14 +56,32 @@ CLEAN_PLATE = 1
 BACKGROUND_SCAN = 2
 MEASUREMENT = 3
 
+# Extra macros
+ZERO_PAYLOAD_HEX = bytes.fromhex("00" * 48)
+
+
+
+def find_device(vendor_id: int, product_id: int) -> usb.core.USBDevice:
+            dev = usb.core.find(idVendor=vendor_id, idProduct=product_id)
+            if not isinstance(dev, usb.core.Device):
+                raise IOError(f"Device VID=0x{vendor_id:04x} PID=0x{product_id:04x} not found")
+            if os.name == "posix":
+                if dev.is_kernel_driver_active(0):
+                    dev.detach_kernel_driver(0)
+                dev.set_configuration()
+                usb.util.claim_interface(dev, 0)
+            return dev
+
 
 class CaryFTIR:
     def __init__(self, interface: int = 0):
-        self.dev = None
         self.sequence = -1
         self.log = logging.getLogger("CaryFTIR")
         self.interface =  interface
         self.state = SETUP
+        self.settings = Settings(None, None)
+        self.dev = find_device(self.settings.vendor_id, self.settings.product_id)
+
 
     # ------------------------------------------------------------------ #
     # USB helpers
@@ -108,6 +131,11 @@ class CaryFTIR:
         data = bytes(self.dev.read(endpoint, MAX_PACKET, timeout=timeout))
         self.log.debug("USB IN  %s", data.hex())
         return data
+    
+    @staticmethod 
+    def _is_timeout(exc: usb.core.USBError) -> bool:
+        errno = getattr(exc, "errno", None)
+        return errno in (60, 110, 116) or "timed out" in str(exc).lower()
         
     # receives a frame 
     def _recv_frame(self, endpoint: int = BULK_IN_PRIMARY, timeout: int = DEFAULT_TIMEOUT_MS) -> Frame:
@@ -254,7 +282,7 @@ class CaryFTIR:
         flags: int = 0,
         param0: int = 0,
         param1: int = 0,
-        payload: bytes = b'',
+        payload: object = b'',
         expected_command: Optional[object] = None,
         ) -> Frame:
         if isinstance(payload, bytes):
@@ -288,17 +316,11 @@ class CaryFTIR:
     # ------------------------------------------------------------------ #
     # High-level functions
     # ------------------------------------------------------------------ #
-    def establish_connection(self, vendor_id: int, product_id: int):
+    def establish_connection(self):
         """ Connects to device and performs the intial handshake """
-        def find_device(vendor_id: int, product_id: int) -> None:
-            dev = usb.core.find(idVendor=vendor_id, idProduct=product_id)
-            if not isinstance(dev, usb.core.Device):
-                raise IOError(f"Device VID=0x{vendor_id:04x} PID=0x{product_id:04x} not found")
-            if os.name == "posix":
-                if dev.is_kernel_driver_active(0):
-                    dev.detach_kernel_driver(0)
-                dev.set_configuration()
-                usb.util.claim_interface(dev, 0)
+        vendor_id = self.settings.vendor_id
+        product_id = self.settings.product_id
+
         
             # Intial step of the hand shake, just an empty payload starting with 0x0d
         def reset_link(driver: CaryFTIR) -> None:
@@ -343,8 +365,8 @@ class CaryFTIR:
             right = struct.unpack_from("<I", frame.payload, 4)[0] & 0x00FFFFFF
             return left, right
     
-        find_device(self, vendor_id, product_id)
-        reset_link()
+        find_device(vendor_id, product_id)
+        reset_link(self)
         query_version(self)
         cmd_19(self)
         counters = query_runtime_counters(self)
@@ -420,22 +442,152 @@ class CaryFTIR:
         ):
             payload = chain_b2(param0, payload)
 
+    def cmd_60_status_poll(self) -> Frame:
+        return self.exchange_frame(
+            BULK_OUT_EP,
+            0x08,
+            0x10,
+            0x60,
+            0x00,
+            0x00000000,
+            0x00000000,
+            ZERO_PAYLOAD_HEX,
+        ) # Funktioner inför measurement stream
 
-    def run_measurement(
+    def cmd_64_ack_and_data(self, secondary_reads: int = 0, secondary_timeout: int = 1_000) -> Tuple[Frame, List[bytes]]:
+        ack = self.exchange_frame(
+            BULK_OUT_EP,
+            0x08,
+            0x10,
+            0x64,
+            0x00,
+            0x00000000,
+            0x00000000,
+            ZERO_PAYLOAD_HEX,
+            expected_command=(0x00, 0x64),
+        )
+        secondary = []
+        for _ in range(secondary_reads):
+            try:
+                secondary.append(self._read_secondary(timeout=secondary_timeout))
+            except usb.core.USBError as exc:
+                if self._is_timeout(exc):
+                    break
+                raise
+        return ack, secondary
+        # Funktioner inför measurement stream
+
+    def start_measurement_stream(self, pre_measure_polls: int , poll_delay: float) -> List[bytes]:
+        for _ in range(pre_measure_polls):
+            time.sleep(poll_delay)
+            self.cmd_60_status_poll()
+
+        self.exchange_frame(
+            BULK_OUT_EP,
+            0x08,
+            0x10,
+            0x62,
+            0x00,
+            0x00400000,
+            0x00000000,
+            ZERO_PAYLOAD_HEX,
+        )
+        _, profile_dump = self.cmd_64_ack_and_data(secondary_reads=2, secondary_timeout=1_000)
+
+        self.exchange_frame(
+            BULK_OUT_EP,
+            0x08,
+            0x10,
+            0x63,
+            0x00,
+            0x00000000,
+            0x00000000,
+            ZERO_PAYLOAD_HEX,
+        )
+        self.exchange_frame(
+            BULK_OUT_EP,
+            0x08,
+            0x10,
+            0x62,
+            0x00,
+            0x01000000,
+            0x00000000,
+            ZERO_PAYLOAD_HEX,
+        )
+        self.cmd_64_ack_and_data(secondary_reads=0)
+        return profile_dump # Nytt
+    
+    def read_measurement_stream(
         self,
-        start_cm: float,
-        stop_cm: float,
-        resolution: int,
+        duration: float,
+        max_frames: int,
         output: Optional[str],
-    ) -> None:
-        
-        pass
+        timeout_ms: int = 1_000,
+    ) -> Tuple[int, int]:
+        deadline = time.monotonic() + duration
+        frame_count = 0
+        byte_count = 0
+        out_file = open(output, "wb") if output else None
+        try:
+            while frame_count < max_frames and time.monotonic() < deadline:
+                try:
+                    raw = self._read_secondary(timeout=timeout_ms)
+                except usb.core.USBError as exc:
+                    if self._is_timeout(exc):
+                        continue
+                    if getattr(exc, "errno", None) == 32:
+                        if frame_count:
+                            self.log.info("Endpoint 0x%02x stalled after data stream ended", BULK_IN_SECONDARY)
+                        else:
+                            self.log.warning("Endpoint 0x%02x stalled before data arrived", BULK_IN_SECONDARY)
+                        break
+                    raise
+                frame_count += 1
+                byte_count += len(raw)
+                if out_file:
+                    out_file.write(raw)
+        finally:
+            if out_file:
+                out_file.close()
+        return frame_count, byte_count # Nytt
 
-    def get_measurement(self):
+    def plot_measurement_file(self, raw_path: str, plot_path: str, show_plot: bool) -> dict:
+        plot_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "plotting_spectra"))
+        if not os.path.isdir(plot_dir):
+            raise FileNotFoundError(f"plotting_spectra directory not found at {plot_dir}")
+
+        inserted = False
+        if plot_dir not in sys.path:
+            sys.path.insert(0, plot_dir)
+            inserted = True
+        try:
+            #TODO: VIKTOR IMPORTERA DIN DEL
+            from run import plot_raw_measurement
+
+            return plot_raw_measurement(raw_path, output_png=plot_path, show=show_plot)
+        finally:
+            if inserted:
+                try:
+                    sys.path.remove(plot_dir)
+                except ValueError:
+                    pass
+        # Nytt, lär göra egen
+
+
+    def get_measurement(
+            self, 
+            pre_measure_polls: int, 
+            poll_delay: float,
+            data_seconds: float,
+            max_data_frames: int,
+            output: Optional[str],
+            plot_enabled: bool,
+            show_plot: bool,
+            plot_output: Optional[str]):
         logging.info("Starting measurement sequence")
-        profile_dump = self.start_measurement_stream(pre_measure_polls=pre_measure_polls, poll_delay=poll_delay)
+        profile_dump = self.start_measurement_stream(pre_measure_polls, poll_delay)
         logging.info("Read %d profile/config packets before acquisition", len(profile_dump))
-        frame_count, byte_count = driver.read_measurement_stream(
+        frame_count, byte_count = self.read_measurement_stream(
             duration=data_seconds,
             max_frames=max_data_frames,
             output=output,
@@ -453,7 +605,7 @@ class CaryFTIR:
                 plot_path = f"{stem}_plot.png"
             try:
                 logging.info("Plotting measurement from %s to %s (show_plot=%s)", output, plot_path, show_plot)
-                plot_stats = plot_measurement_file(output, plot_path, show_plot)
+                plot_stats = self.plot_measurement_file(output, plot_path, show_plot)
                 logging.info("Plotted measurement to %s (%s)", plot_path, plot_stats)
             except ModuleNotFoundError as exc:
                 missing = exc.name or str(exc)
@@ -468,11 +620,21 @@ class CaryFTIR:
         elif plot_enabled and not output:
             logging.warning("Skipping plot because no --out file was provided")
 
-    
+  
+def run_measurement(driver: CaryFTIR) -> None:
+    driver.establish_connection()
+    driver.param_config()
+    driver.get_measurement(
+        driver.settings.pre_measure_polls,
+        driver.settings.poll_delay,
+        driver.settings.data_seconds,
+        driver.settings.max_data_frames,
+        driver.settings.output,
+        driver.settings.plot_enabled,
+        driver.settings.show_plot,
+        driver.settings.plot_output
+    )
 
-        
-
-        
             
 
 
@@ -485,6 +647,7 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
     parser.add_argument("--resolution", type=int, default=4, help="Resolution setting (points)")
     parser.add_argument("--out", type=str, help="Dump raw spectral payloads to file")
     parser.add_argument("--verbose", action="store_true", help="Enable debug logging")
+    # TODO: Funktion som ändrar driver.settings beroende på args
     return parser.parse_args(argv)
 
 def configure_logging(verbose: bool) -> None:
@@ -501,22 +664,17 @@ def main(argv: List[str]) -> None:
     driver = CaryFTIR()
 
     try: 
-        driver.establish_connection(args.vid, args.pid)
+        driver.establish_connection()
     except Exception as exc:
         logging.error("Connection or handshake failed: %s", exc, exc_info=args.verbose)
     
     try: 
-        driver.param_config(args.vid, args.pid)
+        driver.param_config()
     except Exception as exc:
         logging.error("Connection or handshake failed: %s", exc, exc_info=args.verbose)
     
     try:
-        run_measurement(
-            start_cm=args.start,
-            stop_cm=args.stop,
-            resolution=args.resolution,
-            output=args.out,
-        )
+        run_measurement(driver)
     except Exception as exc:  # pylint: disable=broad-except
         logging.error("Measurement failed: %s", exc, exc_info=args.verbose)
         sys.exit(1)
