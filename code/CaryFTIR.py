@@ -203,7 +203,6 @@ class CaryFTIR:
             param0=param0,
             param1=param1,
         )
-        # TODO: This is hardcoded
         zeros_trail = b"\x00" * (frame_len - 16 - len(payload))
 
         self._write(endpoint, header + payload + zeros_trail)
@@ -619,6 +618,20 @@ class CaryFTIR:
                 logging.error("Plotting failed: %s", exc, exc_info=True)
         elif plot_enabled and not output:
             logging.warning("Skipping plot because no --out file was provided")
+
+
+    def shut_down(self):
+        self.send_frame(BULK_OUT_EP, 0x08, 0x15,
+                        pipe_id=0x24,
+                        flags=0x08,
+                        param0=0x00000111,
+                        param1=0x04000400)
+        self._recv_frame()
+
+        self.send_frame(BULK_OUT_EP, 0x08, 0xd5,
+                        pipe_id=0x10,
+                        flags=0x02)
+        self._recv_frame() 
 
   
 def run_measurement(driver: CaryFTIR) -> None:
