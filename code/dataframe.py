@@ -1,16 +1,18 @@
 from dataclasses import dataclass
+from typing import Optional
 
+# Fields that construct the header of the CaryFTIRs packets
 @dataclass
 class Frame:
     type: int
     sequence: int
-    pipe_id: int # Unsure
+    pipe_id: int
     command: int 
     status: int
-    payload_len: int # Seems to be true for some
-    flags: int # Unsure
-    param0: int # Unsure
-    param1: int # Unsure
+    payload_len: int
+    flags: int
+    param0: int
+    param1: int
     payload: bytes
 
     def __str__(self) -> str:
@@ -21,6 +23,20 @@ class Frame:
             f"\npaylod={self.payload.hex(' ')}"
         )
 
+# Settings for the CaryFTIR spectrometer run
+# Can be specified or left to their default values
 @dataclass
-class MeasurementFrame:
-    pass
+class Settings:
+    output: Optional[str] = None 
+    plot_output: Optional[str] = None
+    start_cm: float = 4000
+    stop_cm: float = 650.0
+    resolution: int = 4
+    vendor_id: int = 4020
+    product_id: int = 513
+    data_seconds: float = 10.0
+    max_data_frames: int = 500
+    pre_measure_polls: int = 16
+    poll_delay: float = 0.109
+    plot_enabled: bool = True
+    show_plot: bool = True
