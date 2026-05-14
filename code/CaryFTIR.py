@@ -80,6 +80,7 @@ class CaryFTIR:
         self.state = SETUP
         self.settings = Settings(None, None)
         self.dev = find_device(self.settings.vendor_id, self.settings.product_id)
+        self.measure_count = 0
 
 
     # ------------------------------------------------------------------ #
@@ -309,7 +310,7 @@ class CaryFTIR:
         if frame.command not in expected_commands:
             expected_hex = ", ".join(f"0x{cmd:02x}" for cmd in expected_commands)
             raise IOError(f"Command 0x{command:02x} expected {expected_hex} but got: {frame}")
-        self.log.info(f"Command {command} copy works with payload: {payload_bytes.hex()}")
+        self.log.info(f"Command {command:02x} copy works with payload: {payload_bytes.hex()}")
         return frame 
     
     # ------------------------------------------------------------------ #
@@ -326,8 +327,6 @@ class CaryFTIR:
             """
             Issue the link reset (type 0x0D).
             """
-            seq = driver._next_sequence()
-            dword0 = (0x00 << 16) | (seq << 8) | 0x0D
             driver.send_frame(BULK_OUT_EP, 0x0d, 0x00)
             frame = driver._recv_frame()
             # Check if received frame looks right
@@ -457,7 +456,7 @@ class CaryFTIR:
             0x00000000,
             0x00000000,
             ZERO_PAYLOAD_HEX,
-            # status=self.measure_count,
+            status=self.measure_count,
             expected_command=(0x00),
         )
         secondary = []
@@ -509,6 +508,7 @@ class CaryFTIR:
             ZERO_PAYLOAD_HEX,
         )
         self.cmd_64_ack_and_data(secondary_reads=0)
+        self.measure_count = (self.measure_count + 1) & 0xFF
         return profile_dump # Nytt
     
     def read_measurement_stream(
@@ -674,18 +674,19 @@ def main(argv: List[str]) -> None:
     configure_logging(args.verbose)
     driver = CaryFTIR()
 
-    # try: 
-    #     driver.establish_connection()
-    # except Exception as exc:
-    #     logging.error("Connection or handshake failed: %s", exc, exc_info=args.verbose)
-    #     sys.exit(1)
+    try: 
+        driver.establish_connection()
+    except Exception as exc:
+        logging.error("Connection or handshake failed: %s", exc, exc_info=args.verbose)
+        sys.exit(1)
     
-    # try: 
-    #     driver.param_config()
-    # except Exception as exc:
-    #     logging.error("Parameter config failed: %s", exc, exc_info=args.verbose)
-    #     sys.exit(1)
-    for i in range(2):
+    try: 
+        driver.param_config()
+    except Exception as exc:
+        logging.error("Parameter config failed: %s", exc, exc_info=args.verbose)
+        sys.exit(1)
+        
+    for i in range(1):
         try:
             driver.get_measurement(
                 driver.settings.pre_measure_polls,
@@ -701,8 +702,7 @@ def main(argv: List[str]) -> None:
             logging.error("Measurement failed: %s", exc, exc_info=args.verbose)
             sys.exit(1)
 
-    # driver.shut_down()
-
+    driver.shut_down()
 
 if __name__ == "__main__":
     main(sys.argv[1:])
