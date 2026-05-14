@@ -188,9 +188,9 @@ class CaryFTIR:
         flags: int = 0,
         param0: int = 0,
         param1: int = 0,
-        frame_len : int = 64
+        frame_len : int = 64,
+        p_len : int = 0
     ) -> None:
-        p_len = len(payload)
         header = self._build_header(
             frame_type,
             command,
@@ -221,13 +221,13 @@ class CaryFTIR:
         return frame
 
 
-    # fråga efter parametrar
-    def cmd_b2(self) -> None:
-        self.send_frame(BULK_OUT_EP, 0x08, 0xb2, pipe_id=0x30)
-        frame = self._recv_frame()
-        if frame.command != 0xb2:
-            raise IOError(f"Command b2 failed: {frame}")
-        self.log.info("Command b2 succeded")
+    # # fråga efter parametrar
+    # def cmd_b2(self) -> None:
+    #     self.send_frame(BULK_OUT_EP, 0x08, 0xb2, pipe_id=0x30)
+    #     frame = self._recv_frame()
+    #     if frame.command != 0xb2:
+    #         raise IOError(f"Command b2 failed: {frame}")
+    #     self.log.info("Command b2 succeded")
         
     #------------ MAPPA TILL RIKTIGA VARIABLER ------------------
     # 103 paketen skickar våra variabler
@@ -280,6 +280,7 @@ class CaryFTIR:
         param0: int = 0,
         param1: int = 0,
         payload: object = b'',
+        status: int = 0,
         expected_command: Optional[object] = None,
         ) -> Frame:
         if isinstance(payload, bytes):
@@ -292,6 +293,7 @@ class CaryFTIR:
             frame_type=frame_type,
             pipe_id=pipe_id,
             command=command,
+            status=status,
             flags=flags,
             param0=param0,
             param1=param1,
@@ -398,7 +400,6 @@ class CaryFTIR:
             0x54310000, 0x94310000, 0x84310000,):
             payload = chain_b2(param0, payload)
         payload = bytes.fromhex('000000010000000435333300000000000000000000000000000000000000000030323134000000000000000000000000')
-        
         self.exchange_frame(BULK_OUT_EP, 0x08, 0x30, 0xb3, 0x00, 0x4110,  0x00000400, payload)
         self.exchange_frame(BULK_OUT_EP, 0x0a, 0x04, 0x00, 0x4c, 0x0000,  0x00000400)
         self.send_param()
@@ -456,7 +457,8 @@ class CaryFTIR:
             0x00000000,
             0x00000000,
             ZERO_PAYLOAD_HEX,
-            expected_command=(0x00, 0x64),
+            # status=self.measure_count,
+            expected_command=(0x00),
         )
         secondary = []
         for _ in range(secondary_reads):
@@ -525,8 +527,9 @@ class CaryFTIR:
                 try:
                     raw = self._read_secondary(timeout=timeout_ms)
                 except usb.core.USBError as exc:
+                    print("except")
                     if self._is_timeout(exc):
-                        continue
+                        break
                     if getattr(exc, "errno", None) == 32:
                         if frame_count:
                             self.log.info("Endpoint 0x%02x stalled after data stream ended", BULK_IN_SECONDARY)
@@ -541,6 +544,7 @@ class CaryFTIR:
         finally:
             if out_file:
                 out_file.close()
+
         return frame_count, byte_count # Nytt
 
     def plot_measurement_file(self, raw_path: str, plot_path: str, show_plot: bool) -> dict:
@@ -670,34 +674,34 @@ def main(argv: List[str]) -> None:
     configure_logging(args.verbose)
     driver = CaryFTIR()
 
-    try: 
-        driver.establish_connection()
-    except Exception as exc:
-        logging.error("Connection or handshake failed: %s", exc, exc_info=args.verbose)
-        sys.exit(1)
+    # try: 
+    #     driver.establish_connection()
+    # except Exception as exc:
+    #     logging.error("Connection or handshake failed: %s", exc, exc_info=args.verbose)
+    #     sys.exit(1)
     
-    try: 
-        driver.param_config()
-    except Exception as exc:
-        logging.error("Parameter config failed: %s", exc, exc_info=args.verbose)
-        sys.exit(1)
-    
-    try:
-        driver.get_measurement(
-            driver.settings.pre_measure_polls,
-            driver.settings.poll_delay,
-            driver.settings.data_seconds,
-            driver.settings.max_data_frames,
-            driver.settings.output,
-            driver.settings.plot_enabled,
-            driver.settings.show_plot,
-            driver.settings.plot_output
-        )
-    except Exception as exc:  # pylint: disable=broad-except
-        logging.error("Measurement failed: %s", exc, exc_info=args.verbose)
-        sys.exit(1)
+    # try: 
+    #     driver.param_config()
+    # except Exception as exc:
+    #     logging.error("Parameter config failed: %s", exc, exc_info=args.verbose)
+    #     sys.exit(1)
+    for i in range(2):
+        try:
+            driver.get_measurement(
+                driver.settings.pre_measure_polls,
+                driver.settings.poll_delay,
+                driver.settings.data_seconds,
+                driver.settings.max_data_frames,
+                driver.settings.output,
+                driver.settings.plot_enabled,
+                driver.settings.show_plot,
+                driver.settings.plot_output
+            )
+        except Exception as exc:  # pylint: disable=broad-except
+            logging.error("Measurement failed: %s", exc, exc_info=args.verbose)
+            sys.exit(1)
 
-    driver.shut_down()
+    # driver.shut_down()
 
 
 if __name__ == "__main__":
