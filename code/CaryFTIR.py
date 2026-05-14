@@ -35,7 +35,6 @@ from dataframe import Frame, Settings
 import os
 import sys
 import argparse
-import usb.backend.libusb1
 from dataclasses import dataclass
 
 
@@ -57,11 +56,11 @@ BACKGROUND_SCAN = 2
 MEASUREMENT = 3
 
 # Extra macros
-ZERO_PAYLOAD_HEX = bytes.fromhex("00" * 48)
+ZERO_PAYLOAD_HEX = bytes.fromhex("00" * 48) # Borde vara öndigt. Testa att ta bort
 
 
 
-def find_device(vendor_id: int, product_id: int) -> usb.core.USBDevice:
+def find_device(vendor_id: int, product_id: int) -> usb.core.Device:
             dev = usb.core.find(idVendor=vendor_id, idProduct=product_id)
             if not isinstance(dev, usb.core.Device):
                 raise IOError(f"Device VID=0x{vendor_id:04x} PID=0x{product_id:04x} not found")
@@ -127,7 +126,6 @@ class CaryFTIR:
     def _read_secondary(self, endpoint: int = BULK_IN_SECONDARY, timeout: int = DEFAULT_TIMEOUT_MS) -> bytes:
         # Logging debug info
         # reading from machine
-        print(BULK_IN_SECONDARY)
         data = bytes(self.dev.read(endpoint, MAX_PACKET, timeout=timeout))
         self.log.debug("USB IN  %s", data.hex())
         return data
@@ -364,7 +362,6 @@ class CaryFTIR:
             right = struct.unpack_from("<I", frame.payload, 4)[0] & 0x00FFFFFF
             return left, right
     
-        find_device(vendor_id, product_id)
         reset_link(self)
         query_version(self)
         cmd_19(self)
@@ -400,14 +397,10 @@ class CaryFTIR:
             0x01110000, 0x11110000, 0x21110000, 0x31110000, 0x44110000,
             0x54310000, 0x94310000, 0x84310000,):
             payload = chain_b2(param0, payload)
-            
         payload = bytes.fromhex('000000010000000435333300000000000000000000000000000000000000000030323134000000000000000000000000')
+        
         self.exchange_frame(BULK_OUT_EP, 0x08, 0x30, 0xb3, 0x00, 0x4110,  0x00000400, payload)
         self.exchange_frame(BULK_OUT_EP, 0x0a, 0x04, 0x00, 0x4c, 0x0000,  0x00000400)
-        self.send_param()
-
-        self.exchange_frame(BULK_OUT_EP, 0x08, 0x30, 0xb3, 0x00, 0x41100000, 0x00000400, '000000010000000435333300000000000000000000000000000000000000000030323134000000000000000000000000')
-        self.exchange_frame(BULK_OUT_EP, 0x0a, 0x04, 0x00, 0x4c, 0x00000000, 0x00000000, '000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000')
         self.send_param()
         self.exchange_frame(BULK_OUT_EP, 0x08, 0x30, 0xb3, 0x00, 0x31020000, 0x00000400, '00000000000000000000000084e64f01894e6c10cc0c0000d8e36b10ffffffff78298e10000000000000000000000000')
         self.exchange_frame(BULK_OUT_EP, 0x08, 0x30, 0xb3, 0x00, 0x41020000, 0x00000400, '000000000000000000303935353333000000000004051000022401000991108000060141000000000000000000000000')
@@ -596,7 +589,7 @@ class CaryFTIR:
         else:
             logging.info("Captured %d data packets (%d bytes); use --out to save them", frame_count, byte_count)
 
-        if plot_enabled and output and frame_count:
+        if False:#plot_enabled and output and frame_count:
             if plot_output:
                 plot_path = plot_output
             else:
@@ -634,19 +627,20 @@ class CaryFTIR:
         self._recv_frame() 
 
   
-def run_measurement(driver: CaryFTIR) -> None:
-    driver.establish_connection()
-    driver.param_config()
-    driver.get_measurement(
-        driver.settings.pre_measure_polls,
-        driver.settings.poll_delay,
-        driver.settings.data_seconds,
-        driver.settings.max_data_frames,
-        driver.settings.output,
-        driver.settings.plot_enabled,
-        driver.settings.show_plot,
-        driver.settings.plot_output
-    )
+# def run_measurement(driver: CaryFTIR) -> None:
+#     driver.establish_connection()
+
+#     driver.param_config()
+#     driver.get_measurement(
+#         driver.settings.pre_measure_polls,
+#         driver.settings.poll_delay,
+#         driver.settings.data_seconds,
+#         driver.settings.max_data_frames,
+#         driver.settings.output,
+#         driver.settings.plot_enabled,
+#         driver.settings.show_plot,
+#         driver.settings.plot_output
+#     )
 
             
 
@@ -680,17 +674,30 @@ def main(argv: List[str]) -> None:
         driver.establish_connection()
     except Exception as exc:
         logging.error("Connection or handshake failed: %s", exc, exc_info=args.verbose)
+        sys.exit(1)
     
     try: 
         driver.param_config()
     except Exception as exc:
-        logging.error("Connection or handshake failed: %s", exc, exc_info=args.verbose)
+        logging.error("Parameter config failed: %s", exc, exc_info=args.verbose)
+        sys.exit(1)
     
     try:
-        run_measurement(driver)
+        driver.get_measurement(
+            driver.settings.pre_measure_polls,
+            driver.settings.poll_delay,
+            driver.settings.data_seconds,
+            driver.settings.max_data_frames,
+            driver.settings.output,
+            driver.settings.plot_enabled,
+            driver.settings.show_plot,
+            driver.settings.plot_output
+        )
     except Exception as exc:  # pylint: disable=broad-except
         logging.error("Measurement failed: %s", exc, exc_info=args.verbose)
         sys.exit(1)
+
+    driver.shut_down()
 
 
 if __name__ == "__main__":
