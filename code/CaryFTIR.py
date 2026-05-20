@@ -22,10 +22,10 @@ Requires:
     ensure libusb-1.0.dll is in your path    
 """
 
-
-
+from collections import deque
 import time
 
+import numpy as np
 import usb.util
 import usb.core
 import struct
@@ -41,7 +41,6 @@ from dataclasses import dataclass
 DEFAULT_TIMEOUT_MS = 5_000
 MAX_PACKET = 512
 MAX_PRIMARY_PACKET = 64
-
 
 # Default endpoints for the instrument (see docs/usb-protocol.md).
 BULK_OUT_EP = 0x04
@@ -73,7 +72,7 @@ def find_device(vendor_id: int, product_id: int) -> usb.core.Device:
 
 
 class CaryFTIR:
-    def __init__(self, interface: int = 0):
+    def __init__(self, bg_scans, sample_scans, interface: int = 0):
         self.sequence = -1
         self.log = logging.getLogger("CaryFTIR")
         self.interface =  interface
@@ -81,6 +80,12 @@ class CaryFTIR:
         self.settings = Settings(None, None)
         self.dev = find_device(self.settings.vendor_id, self.settings.product_id)
         self.measure_count = 0
+        self.bg_scans = bg_scans
+        self.sample_scans = sample_scans
+        self.bg = deque(maxlen=bg_scans)
+        self.sample = deque(maxlen=sample_scans)
+        
+        
 
 
     # ------------------------------------------------------------------ #
@@ -511,6 +516,11 @@ class CaryFTIR:
         self.measure_count = (self.measure_count + 1) & 0xFF
         return profile_dump # Nytt
     
+    def add_to_queue(queue: deque, list):
+        queue.append(list)
+    
+    
+    
     def read_measurement_stream(
         self,
         duration: float,
@@ -521,30 +531,33 @@ class CaryFTIR:
         deadline = time.monotonic() + duration
         frame_count = 0
         byte_count = 0
-        out_file = open(output, "wb") if output else None
-        try:
-            while frame_count < max_frames and time.monotonic() < deadline:
-                try:
-                    raw = self._read_secondary(timeout=timeout_ms)
-                except usb.core.USBError as exc:
-                    print("except")
-                    if self._is_timeout(exc):
-                        break
-                    if getattr(exc, "errno", None) == 32:
-                        if frame_count:
-                            self.log.info("Endpoint 0x%02x stalled after data stream ended", BULK_IN_SECONDARY)
-                        else:
-                            self.log.warning("Endpoint 0x%02x stalled before data arrived", BULK_IN_SECONDARY)
-                        break
-                    raise
-                frame_count += 1
-                byte_count += len(raw)
-                if out_file:
-                    out_file.write(raw)
-        finally:
-            if out_file:
-                out_file.close()
+        chunks = []
+        
+        #out_file = open(output, "wb") if output else None
+        while frame_count < max_frames and time.monotonic() < deadline:
+            try:
+                raw = self._read_secondary(timeout=timeout_ms)
+                for i in range(0, len(raw), 8):
+                    chunks.append(raw[i:i+8])
+            except usb.core.USBError as exc:
+                if self._is_timeout(exc):
+                    break
+                if getattr(exc, "errno", None) == 32:
+                    if frame_count:
+                        self.log.info("Endpoint 0x%02x stalled after data stream ended", BULK_IN_SECONDARY)
+                    else:
+                        self.log.warning("Endpoint 0x%02x stalled before data arrived", BULK_IN_SECONDARY)
+                    break
+                raise
+            frame_count += 1
+            byte_count += len(raw)
+        full = np.concatenate(chunks)
 
+        if(self.state == SETUP or self.state == CLEAN_PLATE or self.state == BACKGROUND_SCAN):
+            self.add_to_queue(self.bg, full)
+        else:
+            self.add_to_queue(self.sample, full)
+        
         return frame_count, byte_count # Nytt
 
     def plot_measurement_file(self, raw_path: str, plot_path: str, show_plot: bool) -> dict:
@@ -592,7 +605,6 @@ class CaryFTIR:
             logging.info("Captured %d data packets (%d bytes) to %s", frame_count, byte_count, output)
         else:
             logging.info("Captured %d data packets (%d bytes); use --out to save them", frame_count, byte_count)
-
         if False:#plot_enabled and output and frame_count:
             if plot_output:
                 plot_path = plot_output
@@ -646,8 +658,11 @@ class CaryFTIR:
 #         driver.settings.plot_output
 #     )
 
-            
-
+def range(x):
+    x = int(x)
+    if x < 1 or x > 4:
+        raise argparse.ArgumentTypeError("--bg and --sample must be between 1 and 4")
+    return x
 
 def parse_args(argv: List[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run a Cary FTIR measurement using pyusb.")
@@ -657,6 +672,8 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
     parser.add_argument("--stop", type=float, default=650.0, help="Stop wavenumber (cm^-1)")
     parser.add_argument("--resolution", type=int, default=4, help="Resolution setting (points)")
     parser.add_argument("--out", type=str, help="Dump raw spectral payloads to file")
+    parser.add_argument("--bg", type=range, default=1, help="Amount of background averaging scans 1-4")
+    parser.add_argument("--sample", type=range, default=1, help="Amount of sample averaging scans 1-4")
     parser.add_argument("--verbose", action="store_true", help="Enable debug logging")
     # TODO: Funktion som ändrar driver.settings beroende på args
     return parser.parse_args(argv)
@@ -686,7 +703,7 @@ def main(argv: List[str]) -> None:
         logging.error("Parameter config failed: %s", exc, exc_info=args.verbose)
         sys.exit(1)
         
-    for i in range(1):
+    for _ in range(1):
         try:
             driver.get_measurement(
                 driver.settings.pre_measure_polls,
