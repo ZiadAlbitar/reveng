@@ -62,3 +62,12 @@ Docsen nämer också aldrig port nummer 6, så det verkar missats någonting dä
 # Bartek, 30 mars
 Har laddat ner ILSpy samt MicroLab PC och dekompilerat .dll filer till C#. Har börjat leta runt på information gällande omvandling av sampling datan samt resultat outputen. Har inte hittat några fourier transformen i koden men har hittat klasserna där resultatet förvaras.
 Samt fått en genomgång på hur man gör en mätning med spektrometer i labbsalen och dokumeterat det.
+
+# Albin, 4 april
+Spektrometern mäter konstant data. Mest troligen finns det flaggor i nåt paket (hypotes är 91 bytes paket) som säger om datan ska skickas vidare.
+
+Mycket findings om de olika paketen har hittats, finns i paket_findings och 91_bytes filerna
+
+Storleken på paketen som innehåller datan ändras om inställningen "Spectral resolution" ändras. 
+
+Använt musklickningar för att se när olika paket skickas och vad de kan vara. Fann då att 103 bytes paketen är när man klickar på "Next" på olika sidor i programmet och det är dom paketen som skickar vidare vissa parametrar till spektrometern.
