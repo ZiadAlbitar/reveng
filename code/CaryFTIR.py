@@ -24,7 +24,7 @@ Requires:
 
 from collections import deque
 import time
-
+from pynput import keyboard
 import numpy as np
 import usb.util
 import usb.core
@@ -125,7 +125,8 @@ class CaryFTIR:
     def _read(self, endpoint: int = BULK_IN_PRIMARY, timeout: int = DEFAULT_TIMEOUT_MS) -> bytes:
         # Logging debug info
         # reading from machine
-        data = bytes(self.dev.read(endpoint, MAX_PACKET, timeout=timeout))
+        packet_size = MAX_PRIMARY_PACKET if endpoint == BULK_IN_PRIMARY else MAX_PACKET # Nytt
+        data = bytes(self.dev.read(endpoint, packet_size, timeout=timeout))
         self.log.debug("USB IN  %s", data.hex())
         return data
     
@@ -140,6 +141,19 @@ class CaryFTIR:
     def _is_timeout(exc: usb.core.USBError) -> bool:
         errno = getattr(exc, "errno", None)
         return errno in (60, 110, 116) or "timed out" in str(exc).lower()
+    
+    def change_state(self):
+        if(self.state == SETUP or self.state == MEASUREMENT):
+            self.state = CLEAN_PLATE
+            self.log.info("Please clean plate")
+        elif(self.state == CLEAN_PLATE):
+            self.state = BACKGROUND_SCAN
+            self.log.info("Commencing background scan")
+        elif(self.state == BACKGROUND_SCAN):
+            self.state = MEASUREMENT
+            self.log.info("Collecting sample")
+        
+        return self.state
         
     # receives a frame 
     def _recv_frame(self, endpoint: int = BULK_IN_PRIMARY, timeout: int = DEFAULT_TIMEOUT_MS) -> Frame:
@@ -702,8 +716,15 @@ def main(argv: List[str]) -> None:
     except Exception as exc:
         logging.error("Parameter config failed: %s", exc, exc_info=args.verbose)
         sys.exit(1)
-        
-    for _ in range(1):
+    
+    def on_press(key):
+        if key == keyboard.Key.enter:
+            driver.change_state()
+    
+    listener = keyboard.Listener(on_press=on_press)
+    listener.start()  # start to listen on a separate thread
+
+    while True:
         try:
             driver.get_measurement(
                 driver.settings.pre_measure_polls,
@@ -715,6 +736,10 @@ def main(argv: List[str]) -> None:
                 driver.settings.show_plot,
                 driver.settings.plot_output
             )
+        except KeyboardInterrupt:
+            logging.info("Shutting down")
+            driver.shut_down()
+            break
         except Exception as exc:  # pylint: disable=broad-except
             logging.error("Measurement failed: %s", exc, exc_info=args.verbose)
             sys.exit(1)
