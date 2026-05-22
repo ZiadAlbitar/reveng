@@ -65,12 +65,9 @@ def calc_absorbance(background, sample, waves):
 
     return A_smoothed, waves_final
 
-def get_absorbance_spectrum(bg: deque, sample: deque, scans: int):
+def get_intensity_spectrum(queue: deque, scans: int):
     for i in range(scans):
-        test = bg.index(i)
-        test1 = sample.index(i)
-        
-        
+        test = queue.index(i)  
     
     return
 

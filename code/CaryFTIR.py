@@ -36,6 +36,7 @@ import os
 import sys
 import argparse
 from dataclasses import dataclass
+from threading import Thread
 
 
 DEFAULT_TIMEOUT_MS = 5_000
@@ -56,7 +57,6 @@ MEASUREMENT = 3
 
 # Extra macros
 ZERO_PAYLOAD_HEX = bytes.fromhex("00" * 48) # Borde vara öndigt. Testa att ta bort
-
 
 
 def find_device(vendor_id: int, product_id: int) -> usb.core.Device:
@@ -85,9 +85,6 @@ class CaryFTIR:
         self.bg = deque(maxlen=bg_scans)
         self.sample = deque(maxlen=sample_scans)
         
-        
-
-
     # ------------------------------------------------------------------ #
     # USB helpers
     # ------------------------------------------------------------------ #
@@ -656,6 +653,13 @@ class CaryFTIR:
                         flags=0x02)
         self._recv_frame() 
 
+def calculate_fourier(state, bg, sample):
+    if(state == SETUP or state == CLEAN_PLATE or state == BACKGROUND_SCAN):
+        pass
+    else:
+        pass
+    pass
+        
   
 # def run_measurement(driver: CaryFTIR) -> None:
 #     driver.establish_connection()
@@ -723,7 +727,8 @@ def main(argv: List[str]) -> None:
     
     listener = keyboard.Listener(on_press=on_press)
     listener.start()  # start to listen on a separate thread
-
+    
+    calc_fourier_thread = Thread(target=calculate_fourier, args=(driver.state, driver.bg, driver.sample))
     while True:
         try:
             driver.get_measurement(
@@ -744,7 +749,6 @@ def main(argv: List[str]) -> None:
             logging.error("Measurement failed: %s", exc, exc_info=args.verbose)
             sys.exit(1)
 
-    driver.shut_down()
 
 if __name__ == "__main__":
     main(sys.argv[1:])
