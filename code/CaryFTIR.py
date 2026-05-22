@@ -571,7 +571,7 @@ class CaryFTIR:
             inserted = True
         try:
             #TODO: VIKTOR IMPORTERA DIN DEL
-            from run import plot_raw_measurement
+            from reveng.code.spectrum import plot_raw_measurement
 
             return plot_raw_measurement(raw_path, output_png=plot_path, show=show_plot)
         finally:
@@ -658,7 +658,7 @@ class CaryFTIR:
 #         driver.settings.plot_output
 #     )
 
-def range(x):
+def one_to_four(x):
     x = int(x)
     if x < 1 or x > 4:
         raise argparse.ArgumentTypeError("--bg and --sample must be between 1 and 4")
@@ -672,8 +672,8 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
     parser.add_argument("--stop", type=float, default=650.0, help="Stop wavenumber (cm^-1)")
     parser.add_argument("--resolution", type=int, default=4, help="Resolution setting (points)")
     parser.add_argument("--out", type=str, help="Dump raw spectral payloads to file")
-    parser.add_argument("--bg", type=range, default=1, help="Amount of background averaging scans 1-4")
-    parser.add_argument("--sample", type=range, default=1, help="Amount of sample averaging scans 1-4")
+    parser.add_argument("--bg", type=one_to_four, default=1, help="Amount of background averaging scans 1-4")
+    parser.add_argument("--sample", type=one_to_four, default=1, help="Amount of sample averaging scans 1-4")
     parser.add_argument("--verbose", action="store_true", help="Enable debug logging")
     # TODO: Funktion som ändrar driver.settings beroende på args
     return parser.parse_args(argv)
