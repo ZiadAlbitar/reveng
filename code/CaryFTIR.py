@@ -660,22 +660,6 @@ def calculate_fourier(state, bg, sample):
         pass
     pass
         
-  
-# def run_measurement(driver: CaryFTIR) -> None:
-#     driver.establish_connection()
-
-#     driver.param_config()
-#     driver.get_measurement(
-#         driver.settings.pre_measure_polls,
-#         driver.settings.poll_delay,
-#         driver.settings.data_seconds,
-#         driver.settings.max_data_frames,
-#         driver.settings.output,
-#         driver.settings.plot_enabled,
-#         driver.settings.show_plot,
-#         driver.settings.plot_output
-#     )
-
 def one_to_four(x):
     x = int(x)
     if x < 1 or x > 4:
@@ -724,6 +708,7 @@ def main(argv: List[str]) -> None:
     def on_press(key):
         if key == keyboard.Key.enter:
             driver.change_state()
+        # TODO: add send packet
     
     listener = keyboard.Listener(on_press=on_press)
     listener.start()  # start to listen on a separate thread

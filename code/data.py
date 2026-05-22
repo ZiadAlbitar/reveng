@@ -90,16 +90,13 @@ def get_streams(data_rows):
     for byte in data_rows[1:]:
         if len(byte) < 7: continue
         
-        for i in range(0, len(byte), 8):
-            if i + 8 > len(byte): break
-            
-            # Even ID (Slot 1) -> IR Interferogram
-            ir_val = parse_24bit_signed(byte[i+1], byte[i+2], byte[i+3])
-            ir_stream.append(ir_val)
-            
-            # Odd ID (Slot 2) -> Laser Reference
-            laser_val = parse_24bit_signed(byte[i+5], byte[i+6], byte[i+7])
-            laser_stream.append(laser_val)
+        # Even ID (Slot 1) -> IR Interferogram
+        ir_val = parse_24bit_signed(byte[1], byte[2], byte[3])
+        ir_stream.append(ir_val)
+        
+        # Odd ID (Slot 2) -> Laser Reference
+        laser_val = parse_24bit_signed(byte[5], byte[6], byte[7])
+        laser_stream.append(laser_val)
                 
     return np.array(ir_stream), np.array(laser_stream)
 

@@ -1,7 +1,9 @@
 from collections import deque
-
+from re import I
+from numpy.typing import NDArray
 import numpy as np
 from matplotlib import pyplot as plt
+from reveng.code.data import get_streams
 import scienceplots 
 
 from scipy.signal import savgol_filter
@@ -21,7 +23,7 @@ def get_phase_map(data):
 
     return phase
 
-def get_fourier_transform(ref_laser, interferogram, zero_fill_factor = 1, window = 'hamming', spectral_resolution = 4.0):
+def fourier_transform(ref_laser, interferogram, zero_fill_factor = 1, window = 'hamming', spectral_resolution = 4.0):
     clocked_ir = resample(interferogram, ref_laser)
 
     meaned_interferogram = to_mean(clocked_ir)
@@ -65,11 +67,12 @@ def calc_absorbance(background, sample, waves):
 
     return A_smoothed, waves_final
 
-def get_intensity_spectrum(queue: deque, scans: int):
-    for i in range(scans):
-        test = queue.index(i)  
+def get_intensity_spectrum(measurement_package: NDArray, scans: int):
+    ir, ref_laser = get_streams(measurement_package)
     
-    return
+    waves, spectrum = fourier_transform(ref_laser, ir, zero_fill_factor=1)
+    
+    return spectrum
 
 def plot_raw_measurement(data):
     return
@@ -81,8 +84,8 @@ if __name__ == "__main__":
     bg_laser, bg_ir = get_data(85679, num_packets= 458, PATH = PATH)
     sample_laser, sample_ir = get_data(200531, num_packets= 458, PATH = PATH)
 
-    waves_bg, background = get_fourier_transform(bg_laser, bg_ir)
-    waves_sm, sample = get_fourier_transform(sample_laser, sample_ir)
+    waves_bg, background = fourier_transform(bg_laser, bg_ir)
+    waves_sm, sample = fourier_transform(sample_laser, sample_ir)
 
     absorbance, waves = calc_absorbance(background, sample, waves_sm)
 
