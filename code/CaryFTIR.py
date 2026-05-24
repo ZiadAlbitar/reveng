@@ -23,7 +23,9 @@ Requires:
 """
 
 from collections import deque
+from queue import Queue
 import time
+from matplotlib import pyplot as plt
 from pynput import keyboard
 import numpy as np
 import usb.util
@@ -37,6 +39,8 @@ import sys
 import argparse
 from dataclasses import dataclass
 from threading import Thread
+
+from spectrum import get_intensity_spectrum, get_absorbance_spectrum
 
 
 DEFAULT_TIMEOUT_MS = 5_000
@@ -72,7 +76,7 @@ def find_device(vendor_id: int, product_id: int) -> usb.core.Device:
 
 
 class CaryFTIR:
-    def __init__(self, bg_scans, sample_scans, interface: int = 0):
+    def __init__(self, interface: int = 0):
         self.sequence = -1
         self.log = logging.getLogger("CaryFTIR")
         self.interface =  interface
@@ -80,10 +84,12 @@ class CaryFTIR:
         self.settings = Settings(None, None)
         self.dev = find_device(self.settings.vendor_id, self.settings.product_id)
         self.measure_count = 0
-        self.bg_scans = bg_scans
-        self.sample_scans = sample_scans
-        self.bg = deque(maxlen=bg_scans)
-        self.sample = deque(maxlen=sample_scans)
+        self.bg_scans = self.settings.bg_scans
+        self.sample_scans = self.settings.sample_scans
+        self.bg = deque(maxlen=self.settings.bg_scans)
+        self.sample = deque(maxlen=self.settings.sample_scans)
+        self.fourier_queue = Queue()
+        self.absorbance_spectrum = None
         
     # ------------------------------------------------------------------ #
     # USB helpers
@@ -140,7 +146,7 @@ class CaryFTIR:
         return errno in (60, 110, 116) or "timed out" in str(exc).lower()
     
     def change_state(self):
-        if(self.state == SETUP or self.state == MEASUREMENT):
+        if(self.state == SETUP):
             self.state = CLEAN_PLATE
             self.log.info("Please clean plate")
         elif(self.state == CLEAN_PLATE):
@@ -149,8 +155,30 @@ class CaryFTIR:
         elif(self.state == BACKGROUND_SCAN):
             self.state = MEASUREMENT
             self.log.info("Collecting sample")
+        elif(self.state == MEASUREMENT):
+            self.state = CLEAN_PLATE
+            self.log.info("Please clean plate")
+            self.calculate_absorbance()
+            
+            
         
         return self.state
+    
+    def calculate_absorbance(self):
+        bg = np.zeros_like(self.bg.index(0))
+        for spectrum in self.bg:
+            bg += spectrum
+        bg /= self.bg_scans
+        
+        sample = np.zeros_like(self.sample.index(0))
+        for spectrum in self.sample:
+            sample += spectrum
+        sample /= self.sample_scans
+        
+        waves, absorbance_spectrum = get_absorbance_spectrum(bg, sample)
+        self.absorbance_spectrum = (waves, absorbance_spectrum)
+        
+        return
         
     # receives a frame 
     def _recv_frame(self, endpoint: int = BULK_IN_PRIMARY, timeout: int = DEFAULT_TIMEOUT_MS) -> Frame:
@@ -236,6 +264,43 @@ class CaryFTIR:
 
         frame = self._recv_frame(endpoint=BULK_IN_SECONDARY)
         return frame
+    
+    def _fourier_loop(self):
+        logging.info("Worker thread started")
+        while True:
+            job = self.fourier_queue.get()
+            
+            if job is None:
+                logging.info("Fourier worker thread shutting down.")
+                self.fourier_queue.task_done()
+                break
+            
+            lst, state = job
+            try:
+                # Execute your heavy math processing here
+                spectrum = get_intensity_spectrum(lst)
+                if(state == SETUP or state==CLEAN_PLATE or state==BACKGROUND_SCAN):
+                    self.bg.append(spectrum)
+                else:
+                    self.sample.append(spectrum)
+            except Exception as exc:
+                logging.error("Fourier calculation failed: %s", exc, exc_info=self.args.verbose)
+            finally:
+                # Signal to the queue that this task is complete
+                self.fourier_queue.task_done()
+        return
+    
+    def _on_press(self, key):
+        if key == keyboard.Key.enter:
+            self.change_state()
+        # TODO: add send packet
+    
+    def _start_threads(self):
+        self.worker_thread = Thread(target=self._fourier_loop, daemon=True)
+        self.worker_thread.start()
+
+        self.listener = keyboard.Listener(on_press=self._on_press)
+        self.listener.start()
 
 
     # # fråga efter parametrar
@@ -562,14 +627,15 @@ class CaryFTIR:
                 raise
             frame_count += 1
             byte_count += len(raw)
-        full = np.concatenate(chunks)
+            
+        #full = np.concatenate(chunks)
 
-        if(self.state == SETUP or self.state == CLEAN_PLATE or self.state == BACKGROUND_SCAN):
-            self.add_to_queue(self.bg, full)
-        else:
-            self.add_to_queue(self.sample, full)
+        info = (chunks,self.state)
         
-        return frame_count, byte_count # Nytt
+        #This unpauses the worker thread
+        self.fourier_queue.put(info)
+        
+        return frame_count, byte_count 
 
     def plot_measurement_file(self, raw_path: str, plot_path: str, show_plot: bool) -> dict:
         plot_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "plotting_spectra"))
@@ -616,28 +682,28 @@ class CaryFTIR:
             logging.info("Captured %d data packets (%d bytes) to %s", frame_count, byte_count, output)
         else:
             logging.info("Captured %d data packets (%d bytes); use --out to save them", frame_count, byte_count)
-        if False:#plot_enabled and output and frame_count:
-            if plot_output:
-                plot_path = plot_output
-            else:
-                stem, _ = os.path.splitext(output)
-                plot_path = f"{stem}_plot.png"
-            try:
-                logging.info("Plotting measurement from %s to %s (show_plot=%s)", output, plot_path, show_plot)
-                plot_stats = self.plot_measurement_file(output, plot_path, show_plot)
-                logging.info("Plotted measurement to %s (%s)", plot_path, plot_stats)
-            except ModuleNotFoundError as exc:
-                missing = exc.name or str(exc)
-                logging.error(
-                    "Plotting failed because Python package '%s' is not installed. "
-                    "Install plotting dependencies with: python -m pip install numpy matplotlib",
-                    missing,
-                    exc_info=True,
-                )
-            except Exception as exc:  # pylint: disable=broad-except
-                logging.error("Plotting failed: %s", exc, exc_info=True)
-        elif plot_enabled and not output:
-            logging.warning("Skipping plot because no --out file was provided")
+        # if False:#plot_enabled and output and frame_count:
+        #     if plot_output:
+        #         plot_path = plot_output
+        #     else:
+        #         stem, _ = os.path.splitext(output)
+        #         plot_path = f"{stem}_plot.png"
+        #     try:
+        #         logging.info("Plotting measurement from %s to %s (show_plot=%s)", output, plot_path, show_plot)
+        #         plot_stats = self.plot_measurement_file(output, plot_path, show_plot)
+        #         logging.info("Plotted measurement to %s (%s)", plot_path, plot_stats)
+        #     except ModuleNotFoundError as exc:
+        #         missing = exc.name or str(exc)
+        #         logging.error(
+        #             "Plotting failed because Python package '%s' is not installed. "
+        #             "Install plotting dependencies with: python -m pip install numpy matplotlib",
+        #             missing,
+        #             exc_info=True,
+        #         )
+        #     except Exception as exc:  # pylint: disable=broad-except
+        #         logging.error("Plotting failed: %s", exc, exc_info=True)
+        # elif plot_enabled and not output:
+        #     logging.warning("Skipping plot because no --out file was provided")
 
 
     def shut_down(self):
@@ -652,13 +718,6 @@ class CaryFTIR:
                         pipe_id=0x10,
                         flags=0x02)
         self._recv_frame() 
-
-def calculate_fourier(state, bg, sample):
-    if(state == SETUP or state == CLEAN_PLATE or state == BACKGROUND_SCAN):
-        pass
-    else:
-        pass
-    pass
         
 def one_to_four(x):
     x = int(x)
@@ -705,15 +764,8 @@ def main(argv: List[str]) -> None:
         logging.error("Parameter config failed: %s", exc, exc_info=args.verbose)
         sys.exit(1)
     
-    def on_press(key):
-        if key == keyboard.Key.enter:
-            driver.change_state()
-        # TODO: add send packet
+    driver._start_threads()
     
-    listener = keyboard.Listener(on_press=on_press)
-    listener.start()  # start to listen on a separate thread
-    
-    calc_fourier_thread = Thread(target=calculate_fourier, args=(driver.state, driver.bg, driver.sample))
     while True:
         try:
             driver.get_measurement(
@@ -733,6 +785,27 @@ def main(argv: List[str]) -> None:
         except Exception as exc:  # pylint: disable=broad-except
             logging.error("Measurement failed: %s", exc, exc_info=args.verbose)
             sys.exit(1)
+    
+    plt.style.use('.\\scienceplots\\science.mplstyle')
+
+
+    plt.figure(figsize=(10, 6))
+    plt.plot(driver.absorbance_spectrum[0], driver.absorbance_spectrum[1], linewidth=1.0, label=r"Raw Estimation", alpha=0.8)
+
+
+    plt.legend()
+    plt.ylim(-0.05, 0.6)
+    plt.xlim(4000, 650)
+
+    plt.xlabel(r"Wavenumber ($\mathrm{cm}^{-1}$)")
+    plt.ylabel(r"Absorbance")
+    plt.title(r"Phase-corrected Isopropanol spectrum")
+
+    plt.grid(True, which='both', linestyle='--', alpha=0.5)
+
+    plt.show()
+        
+        
 
 
 if __name__ == "__main__":

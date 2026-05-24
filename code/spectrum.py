@@ -3,7 +3,6 @@ from re import I
 from numpy.typing import NDArray
 import numpy as np
 from matplotlib import pyplot as plt
-from reveng.code.data import get_streams
 import scienceplots 
 
 from scipy.signal import savgol_filter
@@ -11,7 +10,7 @@ import pandas as pd
 
 # Assuming these are available in your local environment
 from confsmooth import confsmooth
-from data import get_data, resample
+from data import get_data, resample, get_streams
 from FTIR import *
 
 
@@ -23,17 +22,15 @@ def get_phase_map(data):
 
     return phase
 
-def fourier_transform(ref_laser, interferogram, zero_fill_factor = 1, window = 'hamming', spectral_resolution = 4.0):
-    clocked_ir = resample(interferogram, ref_laser)
-
+def fourier_transform(clocked_ir, zero_fill_factor = 1, window = 'hamming', spectral_resolution = 4.0):
     meaned_interferogram = to_mean(clocked_ir)
-    apodized = apodize(meaned_interferogram, window, about = 'zpd')
+    #apodized = apodize(meaned_interferogram, window, about = 'zpd')
 
-    pip = pipramp(apodized)
-    phase_map = get_phase_map(pip)
+    phase_map = get_phase_map(meaned_interferogram)
 
+    pip = pipramp(meaned_interferogram)
 
-    z_len = zero_fill(apodized, zero_fill_factor) # Usually doubles the length
+    z_len = zero_fill(pip, zero_fill_factor) # Usually doubles the length
     padded = np.pad(pip, (0, z_len - len(pip)), mode='constant')
 
     rot = rotate(padded)
@@ -65,17 +62,61 @@ def calc_absorbance(background, sample, waves):
     # Window length must be odd
     A_smoothed = savgol_filter(absorbance, window_length=11, polyorder=2)
 
-    return A_smoothed, waves_final
+    return waves_final, A_smoothed
 
 def get_intensity_spectrum(measurement_package: NDArray, scans: int):
-    ir, ref_laser = get_streams(measurement_package)
+    clocked_ir = get_streams(measurement_package)
     
-    waves, spectrum = fourier_transform(ref_laser, ir, zero_fill_factor=1)
+    waves, spectrum = fourier_transform(clocked_ir, zero_fill_factor=1)
     
     return spectrum
 
-def plot_raw_measurement(data):
-    return
+def get_absorbance_spectrum(background, sample):
+    waves = get_wavenumbers(background)
+    
+    waves, spectrum = calc_absorbance(background, sample, waves)
+    
+    return waves, spectrum
+    
+
+# def plot_raw_measurement(raw_path, output_png=None, show=False, title="Cary FTIR measurement"):
+#     ref_laser, interferogram = get_data_from_raw(raw_path)
+#     if len(ref_laser) == 0 or len(interferogram) == 0:
+#         raise ValueError(f"No stream samples parsed from {raw_path}")
+
+#     clocked_ir = resample(interferogram, ref_laser)
+#     waves, spectrum = get_fourier_transform(ref_laser, interferogram)
+
+#     fig, axes = plt.subplots(2, 1, figsize=(10, 8), constrained_layout=True)
+
+#     axes[0].plot(clocked_ir, linewidth=0.7)
+#     axes[0].set_title(f"{title}: clocked interferogram")
+#     axes[0].set_xlabel("Laser zero-crossing index")
+#     axes[0].set_ylabel("Intensity")
+#     if len(clocked_ir) > 1300:
+#         axes[0].set_xlim(0, 1300)
+
+#     axes[1].plot(waves, spectrum, linewidth=0.8)
+#     axes[1].set_title(f"{title}: single-beam spectrum")
+#     axes[1].set_xlabel(r"Wavenumber ($\mathrm{cm}^{-1}$)")
+#     axes[1].set_ylabel("Intensity")
+#     axes[1].set_xlim(4000, 650)
+#     axes[1].grid(True, which='both', linestyle='--', alpha=0.4)
+
+#     if output_png:
+#         fig.savefig(output_png, dpi=150)
+#     if show:
+#         plt.show()
+#     else:
+#         plt.close(fig)
+
+#     return {
+#         "raw_ir_points": int(len(interferogram)),
+#         "raw_laser_points": int(len(ref_laser)),
+#         "clocked_points": int(len(clocked_ir)),
+#         "spectrum_points": int(len(spectrum)),
+#         "output_png": output_png,
+#     }
 
 if __name__ == "__main__":
     PATH = "outputs/iso_prop_2.csv"

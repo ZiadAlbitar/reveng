@@ -1,3 +1,4 @@
+import argparse
 from dataclasses import dataclass
 from typing import Optional
 
@@ -23,6 +24,11 @@ class Frame:
             f"\npaylod={self.payload.hex(' ')}"
         )
 
+def one_to_four(x):
+    x = int(x)
+    if x < 1 or x > 4:
+        raise argparse.ArgumentTypeError("--bg and --sample must be between 1 and 4")
+    return x
 # Settings for the CaryFTIR spectrometer run
 # Can be specified or left to their default values
 @dataclass
@@ -40,3 +46,5 @@ class Settings:
     poll_delay: float = 0.109
     plot_enabled: bool = True
     show_plot: bool = True
+    bg_scans: one_to_four = 3
+    sample_scans: one_to_four = 3

@@ -97,8 +97,9 @@ def get_streams(data_rows):
         # Odd ID (Slot 2) -> Laser Reference
         laser_val = parse_24bit_signed(byte[5], byte[6], byte[7])
         laser_stream.append(laser_val)
-                
-    return np.array(ir_stream), np.array(laser_stream)
+    
+    clocked_ir = resample(np.array(ir_stream), np.array(laser_stream))
+    return clocked_ir
 
 # --- 2. STEP 2: FRINGE MAPPING (RE-GRIDDING) ---
 
