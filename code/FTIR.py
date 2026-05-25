@@ -19,7 +19,7 @@ def get_wavenumbers(n_points):
     # Sampling frequency in cm^-1
     delta_opd = (HE_NE_LAMBDA / N_AIR) / 2.0
     fs = 1.0 / (delta_opd * 100) 
-    waves = np.linspace(0, fs / 2, n_points)
+    waves = np.linspace(0, fs // 2, n_points)
     return waves
 
 def phase_corrected(spectra, phase):

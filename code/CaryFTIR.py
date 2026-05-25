@@ -90,6 +90,7 @@ class CaryFTIR:
         self.sample = deque(maxlen=self.settings.sample_scans)
         self.fourier_queue = Queue()
         self.absorbance_spectrum = None
+        self.waves = None
         
     # ------------------------------------------------------------------ #
     # USB helpers
@@ -160,22 +161,21 @@ class CaryFTIR:
             self.log.info("Please clean plate")
             self.calculate_absorbance()
             
-            
-        
         return self.state
     
     def calculate_absorbance(self):
-        bg = np.zeros_like(self.bg.index(0))
+        self.fourier_queue.join()
+        bg = self.bg.pop()
         for spectrum in self.bg:
             bg += spectrum
         bg /= self.bg_scans
         
-        sample = np.zeros_like(self.sample.index(0))
+        sample = self.sample.pop()
         for spectrum in self.sample:
             sample += spectrum
         sample /= self.sample_scans
         
-        waves, absorbance_spectrum = get_absorbance_spectrum(bg, sample)
+        waves, absorbance_spectrum = get_absorbance_spectrum(self.waves, bg, sample)
         self.absorbance_spectrum = (waves, absorbance_spectrum)
         
         return
@@ -278,13 +278,16 @@ class CaryFTIR:
             lst, state = job
             try:
                 # Execute your heavy math processing here
-                spectrum = get_intensity_spectrum(lst)
+                waves, spectrum = get_intensity_spectrum(lst)
                 if(state == SETUP or state==CLEAN_PLATE or state==BACKGROUND_SCAN):
                     self.bg.append(spectrum)
                 else:
                     self.sample.append(spectrum)
+                self.waves = waves
+                
             except Exception as exc:
                 logging.error("Fourier calculation failed: %s", exc, exc_info=self.args.verbose)
+                sys.exit(1)
             finally:
                 # Signal to the queue that this task is complete
                 self.fourier_queue.task_done()
@@ -765,41 +768,72 @@ def main(argv: List[str]) -> None:
         sys.exit(1)
     
     driver._start_threads()
-    
-    while True:
-        try:
-            driver.get_measurement(
-                driver.settings.pre_measure_polls,
-                driver.settings.poll_delay,
-                driver.settings.data_seconds,
-                driver.settings.max_data_frames,
-                driver.settings.output,
-                driver.settings.plot_enabled,
-                driver.settings.show_plot,
-                driver.settings.plot_output
-            )
-        except KeyboardInterrupt:
-            logging.info("Shutting down")
-            driver.shut_down()
-            break
-        except Exception as exc:  # pylint: disable=broad-except
-            logging.error("Measurement failed: %s", exc, exc_info=args.verbose)
-            sys.exit(1)
-    
-    plt.style.use('.\\scienceplots\\science.mplstyle')
 
+    driver.change_state()
+    driver.change_state()
+    
+    # while True:
+    #     try:
+    #         driver.get_measurement(
+    #             driver.settings.pre_measure_polls,
+    #             driver.settings.poll_delay,
+    #             driver.settings.data_seconds,
+    #             driver.settings.max_data_frames,
+    #             driver.settings.output,
+    #             driver.settings.plot_enabled,
+    #             driver.settings.show_plot,
+    #             driver.settings.plot_output
+    #         )
+    #     except KeyboardInterrupt:
+    #         logging.info("Shutting down")
+    #         driver.shut_down()
+    #         break
+    #     except Exception as exc:  # pylint: disable=broad-except
+    #         logging.error("Measurement failed: %s", exc, exc_info=args.verbose)
+    #         sys.exit(1)
+    try:
+        driver.get_measurement(
+            driver.settings.pre_measure_polls,
+            driver.settings.poll_delay,
+            driver.settings.data_seconds,
+            driver.settings.max_data_frames,
+            driver.settings.output,
+            driver.settings.plot_enabled,
+            driver.settings.show_plot,
+            driver.settings.plot_output
+        )
+    except Exception as exc:  # pylint: disable=broad-except
+        logging.error("background scan failed: %s", exc, exc_info=args.verbose)
+        sys.exit(1)
+    driver.change_state()
+
+    try:
+        driver.get_measurement(
+            driver.settings.pre_measure_polls,
+            driver.settings.poll_delay,
+            driver.settings.data_seconds,
+            driver.settings.max_data_frames,
+            driver.settings.output,
+            driver.settings.plot_enabled,
+            driver.settings.show_plot,
+            driver.settings.plot_output
+        )
+    except Exception as exc:  # pylint: disable=broad-except
+        logging.error("Measurement failed: %s", exc, exc_info=args.verbose)
+        sys.exit(1)
+    driver.change_state()
+
+    # plt.style.use('.\\scienceplots\\science.mplstyle')
 
     plt.figure(figsize=(10, 6))
     plt.plot(driver.absorbance_spectrum[0], driver.absorbance_spectrum[1], linewidth=1.0, label=r"Raw Estimation", alpha=0.8)
 
-
     plt.legend()
-    plt.ylim(-0.05, 0.6)
     plt.xlim(4000, 650)
 
-    plt.xlabel(r"Wavenumber ($\mathrm{cm}^{-1}$)")
-    plt.ylabel(r"Absorbance")
-    plt.title(r"Phase-corrected Isopropanol spectrum")
+    plt.xlabel("Wavenumber (cm^-1)")
+    plt.ylabel("Absorbance")
+    plt.title("Demo run on background sample")
 
     plt.grid(True, which='both', linestyle='--', alpha=0.5)
 

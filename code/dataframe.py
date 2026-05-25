@@ -46,5 +46,5 @@ class Settings:
     poll_delay: float = 0.109
     plot_enabled: bool = True
     show_plot: bool = True
-    bg_scans: one_to_four = 3
-    sample_scans: one_to_four = 3
+    bg_scans: one_to_four = 1
+    sample_scans: one_to_four = 1

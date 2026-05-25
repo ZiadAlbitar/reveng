@@ -64,15 +64,14 @@ def calc_absorbance(background, sample, waves):
 
     return waves_final, A_smoothed
 
-def get_intensity_spectrum(measurement_package: NDArray, scans: int):
+def get_intensity_spectrum(measurement_package: NDArray):
     clocked_ir = get_streams(measurement_package)
     
     waves, spectrum = fourier_transform(clocked_ir, zero_fill_factor=1)
     
-    return spectrum
+    return waves, spectrum
 
-def get_absorbance_spectrum(background, sample):
-    waves = get_wavenumbers(background)
+def get_absorbance_spectrum(waves, background, sample):
     
     waves, spectrum = calc_absorbance(background, sample, waves)
     
