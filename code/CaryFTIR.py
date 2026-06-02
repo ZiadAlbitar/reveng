@@ -1,27 +1,3 @@
-"""
-Prototype USB driver for Cary FTIR instruments using pyusb.
-
-The script mirrors the reverse-engineered protocol documented in:
-  - docs/usb-protocol.md
-  - docs/driver-guide.md
-
-It performs the following high-level steps:
-  1. Locate the WinUSB interface (interface 0) for the target VID/PID.
-  2. Execute the five-stage handshake (reset, version query, counters, register dump).
-  3. Subscribe to status notifications.
-  4. Push default collection parameters (igram/single-beam settings).
-  5. Start a single-beam collect and stream the raw spectral data.
-
-Spectral payload decoding is left as a TODO (blocks arriving on pipe 0x85
-with `type 0x18` are written to disk for later analysis).
-
-Requires:
-    pip install pyusb
-    pip install libusb1
-
-    ensure libusb-1.0.dll is in your path    
-"""
-
 from collections import deque
 from queue import Queue
 import time
@@ -33,21 +9,21 @@ import usb.core
 import struct
 import logging
 from typing import Optional, Tuple, List
-from dataframe import Frame, Settings
+from classes import Frame, Settings
 import os
 import sys
 import argparse
 from dataclasses import dataclass
 from threading import Thread
 
-from spectrum import get_intensity_spectrum, get_absorbance_spectrum
+from math.spectrum import get_intensity_spectrum, get_absorbance_spectrum
 
 
 DEFAULT_TIMEOUT_MS = 5_000
 MAX_PACKET = 512
 MAX_PRIMARY_PACKET = 64
 
-# Default endpoints for the instrument (see docs/usb-protocol.md).
+# Default endpoints for the instrument
 BULK_OUT_EP = 0x04
 BULK_OUT_PARAM = 0x06
 BULK_IN_PRIMARY = 0x83
@@ -62,7 +38,6 @@ MEASUREMENT = 3
 # Extra macros
 ZERO_PAYLOAD_HEX = bytes.fromhex("00" * 48) # Borde vara öndigt. Testa att ta bort
 
-
 def find_device(vendor_id: int, product_id: int) -> usb.core.Device:
             dev = usb.core.find(idVendor=vendor_id, idProduct=product_id)
             if not isinstance(dev, usb.core.Device):
@@ -76,12 +51,12 @@ def find_device(vendor_id: int, product_id: int) -> usb.core.Device:
 
 
 class CaryFTIR:
-    def __init__(self, interface: int = 0):
+    def __init__(self, interface: int = 0, Settings: Settings = Settings(None, None)):
         self.sequence = -1
         self.log = logging.getLogger("CaryFTIR")
         self.interface =  interface
         self.state = SETUP
-        self.settings = Settings(None, None)
+        self.settings = Settings
         self.dev = find_device(self.settings.vendor_id, self.settings.product_id)
         self.measure_count = 0
         self.bg_scans = self.settings.bg_scans
@@ -129,7 +104,7 @@ class CaryFTIR:
     def _read(self, endpoint: int = BULK_IN_PRIMARY, timeout: int = DEFAULT_TIMEOUT_MS) -> bytes:
         # Logging debug info
         # reading from machine
-        packet_size = MAX_PRIMARY_PACKET if endpoint == BULK_IN_PRIMARY else MAX_PACKET # Nytt
+        packet_size = MAX_PRIMARY_PACKET if endpoint == BULK_IN_PRIMARY else MAX_PACKET 
         data = bytes(self.dev.read(endpoint, packet_size, timeout=timeout))
         self.log.debug("USB IN  %s", data.hex())
         return data
@@ -146,6 +121,17 @@ class CaryFTIR:
         errno = getattr(exc, "errno", None)
         return errno in (60, 110, 116) or "timed out" in str(exc).lower()
     
+    def save_spectrum(self, output, spectrum):
+        out_file = open(output, "wb") if output else None
+        
+        try:
+            if out_file:
+                out_file.write(spectrum)
+        finally:
+            if out_file:
+                out_file.close()
+        
+    
     def change_state(self):
         if(self.state == SETUP):
             self.state = CLEAN_PLATE
@@ -160,6 +146,8 @@ class CaryFTIR:
             self.state = CLEAN_PLATE
             self.log.info("Please clean plate")
             self.calculate_absorbance()
+            self.save_spectrum(self.settings.output, self.absorbance_spectrum)
+            
             
         return self.state
     
@@ -277,7 +265,6 @@ class CaryFTIR:
             
             lst, state = job
             try:
-                # Execute your heavy math processing here
                 waves, spectrum = get_intensity_spectrum(lst)
                 if(state == SETUP or state==CLEAN_PLATE or state==BACKGROUND_SCAN):
                     self.bg.append(spectrum)
@@ -304,15 +291,6 @@ class CaryFTIR:
 
         self.listener = keyboard.Listener(on_press=self._on_press)
         self.listener.start()
-
-
-    # # fråga efter parametrar
-    # def cmd_b2(self) -> None:
-    #     self.send_frame(BULK_OUT_EP, 0x08, 0xb2, pipe_id=0x30)
-    #     frame = self._recv_frame()
-    #     if frame.command != 0xb2:
-    #         raise IOError(f"Command b2 failed: {frame}")
-    #     self.log.info("Command b2 succeded")
         
     #------------ MAPPA TILL RIKTIGA VARIABLER ------------------
     # 103 paketen skickar våra variabler
@@ -346,7 +324,6 @@ class CaryFTIR:
             pipe_id=0x1c, 
             param0=0x00000c00, 
             param1=0x00000100, 
-            # fromhex() städar bort mellanslag och gör om till riktiga bytes
             payload=bytes.fromhex(hex_data) 
         )
         frame = self._recv_frame()
@@ -371,7 +348,6 @@ class CaryFTIR:
         if isinstance(payload, bytes):
             payload_bytes = payload
         else:
-            # fromhex() städar bort mellanslag och gör om till riktiga bytes
             payload_bytes = bytes.fromhex(str(payload))
         self.send_frame(
             endpoint=endpoint,
@@ -400,13 +376,8 @@ class CaryFTIR:
     # ------------------------------------------------------------------ #
     # High-level functions
     # ------------------------------------------------------------------ #
-    def establish_connection(self):
+    def handshake(self):
         """ Connects to device and performs the intial handshake """
-        vendor_id = self.settings.vendor_id
-        product_id = self.settings.product_id
-
-        
-            # Intial step of the hand shake, just an empty payload starting with 0x0d
         def reset_link(driver: CaryFTIR) -> None:
             """
             Issue the link reset (type 0x0D).
@@ -452,7 +423,43 @@ class CaryFTIR:
         cmd_19(self)
         counters = query_runtime_counters(self)
         logging.info("Runtime counters: %s", counters)
+
+    def boot(self):
+        try: 
+            self.handshake()
+        except Exception as exc:
+            logging.error("Connection or handshake failed: %s", exc, exc_info=self.settings.verbose)
+            sys.exit(1)
     
+        try: 
+            self.param_config()
+        except Exception as exc:
+            logging.error("Parameter config failed: %s", exc, exc_info=self.settings.verbose)
+            sys.exit(1)
+    
+        self._start_threads()
+
+    def measurement_loop(self):
+        while True:
+            try:
+                self.get_measurement(
+                    self.settings.pre_measure_polls,
+                    self.settings.poll_delay,
+                    self.settings.data_seconds,
+                    self.settings.max_data_frames,
+                    self.settings.output,
+                    self.settings.plot_enabled,
+                    self.settings.show_plot,
+                    self.settings.plot_output
+                )
+            except KeyboardInterrupt:
+                logging.info("Shutting down")
+                self.shut_down()
+                break
+            except Exception as exc:  # pylint: disable=broad-except
+                logging.error("Measurement failed: %s", exc, exc_info=self.settings.verbose)
+                sys.exit(1)
+         
     
     def param_config(self):
         self.read_register(0x40)
@@ -528,7 +535,7 @@ class CaryFTIR:
             0x00000000,
             0x00000000,
             ZERO_PAYLOAD_HEX,
-        ) # Funktioner inför measurement stream
+        ) 
 
     def cmd_64_ack_and_data(self, secondary_reads: int = 0, secondary_timeout: int = 1_000) -> Tuple[Frame, List[bytes]]:
         ack = self.exchange_frame(
@@ -552,7 +559,6 @@ class CaryFTIR:
                     break
                 raise
         return ack, secondary
-        # Funktioner inför measurement stream
 
     def start_measurement_stream(self, pre_measure_polls: int , poll_delay: float) -> List[bytes]:
         for _ in range(pre_measure_polls):
@@ -593,12 +599,10 @@ class CaryFTIR:
         )
         self.cmd_64_ack_and_data(secondary_reads=0)
         self.measure_count = (self.measure_count + 1) & 0xFF
-        return profile_dump # Nytt
+        return profile_dump 
     
     def add_to_queue(queue: deque, list):
         queue.append(list)
-    
-    
     
     def read_measurement_stream(
         self,
@@ -612,7 +616,6 @@ class CaryFTIR:
         byte_count = 0
         chunks = []
         
-        #out_file = open(output, "wb") if output else None
         while frame_count < max_frames and time.monotonic() < deadline:
             try:
                 raw = self._read_secondary(timeout=timeout_ms)
@@ -630,38 +633,27 @@ class CaryFTIR:
                 raise
             frame_count += 1
             byte_count += len(raw)
-            
-        #full = np.concatenate(chunks)
-
+        
         info = (chunks,self.state)
         
-        #This unpauses the worker thread
         self.fourier_queue.put(info)
         
         return frame_count, byte_count 
 
-    def plot_measurement_file(self, raw_path: str, plot_path: str, show_plot: bool) -> dict:
-        plot_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "plotting_spectra"))
-        if not os.path.isdir(plot_dir):
-            raise FileNotFoundError(f"plotting_spectra directory not found at {plot_dir}")
+    def plot_measurement(self, raw_path: str, plot_path: str, show_plot: bool) -> None:
+        plt.figure(figsize=(10, 6))
+        plt.plot(self.absorbance_spectrum[0], self.absorbance_spectrum[1], linewidth=1.0, label=r"Raw Estimation", alpha=0.8)
 
-        inserted = False
-        if plot_dir not in sys.path:
-            sys.path.insert(0, plot_dir)
-            inserted = True
-        try:
-            #TODO: VIKTOR IMPORTERA DIN DEL
-            from reveng.code.spectrum import plot_raw_measurement
+        plt.legend()
+        plt.xlim(4000, 650)
 
-            return plot_raw_measurement(raw_path, output_png=plot_path, show=show_plot)
-        finally:
-            if inserted:
-                try:
-                    sys.path.remove(plot_dir)
-                except ValueError:
-                    pass
-        # Nytt, lär göra egen
+        plt.xlabel("Wavenumber (cm^-1)")
+        plt.ylabel("Absorbance")
+        plt.title("Demo run on background sample")
 
+        plt.grid(True, which='both', linestyle='--', alpha=0.5)
+
+        plt.show()
 
     def get_measurement(
             self, 
@@ -669,10 +661,7 @@ class CaryFTIR:
             poll_delay: float,
             data_seconds: float,
             max_data_frames: int,
-            output: Optional[str],
-            plot_enabled: bool,
-            show_plot: bool,
-            plot_output: Optional[str]):
+            output: Optional[str]):
         logging.info("Starting measurement sequence")
         profile_dump = self.start_measurement_stream(pre_measure_polls, poll_delay)
         logging.info("Read %d profile/config packets before acquisition", len(profile_dump))
@@ -685,28 +674,6 @@ class CaryFTIR:
             logging.info("Captured %d data packets (%d bytes) to %s", frame_count, byte_count, output)
         else:
             logging.info("Captured %d data packets (%d bytes); use --out to save them", frame_count, byte_count)
-        # if False:#plot_enabled and output and frame_count:
-        #     if plot_output:
-        #         plot_path = plot_output
-        #     else:
-        #         stem, _ = os.path.splitext(output)
-        #         plot_path = f"{stem}_plot.png"
-        #     try:
-        #         logging.info("Plotting measurement from %s to %s (show_plot=%s)", output, plot_path, show_plot)
-        #         plot_stats = self.plot_measurement_file(output, plot_path, show_plot)
-        #         logging.info("Plotted measurement to %s (%s)", plot_path, plot_stats)
-        #     except ModuleNotFoundError as exc:
-        #         missing = exc.name or str(exc)
-        #         logging.error(
-        #             "Plotting failed because Python package '%s' is not installed. "
-        #             "Install plotting dependencies with: python -m pip install numpy matplotlib",
-        #             missing,
-        #             exc_info=True,
-        #         )
-        #     except Exception as exc:  # pylint: disable=broad-except
-        #         logging.error("Plotting failed: %s", exc, exc_info=True)
-        # elif plot_enabled and not output:
-        #     logging.warning("Skipping plot because no --out file was provided")
 
 
     def shut_down(self):
@@ -755,131 +722,11 @@ def main(argv: List[str]) -> None:
     configure_logging(args.verbose)
     driver = CaryFTIR()
 
-    try: 
-        driver.establish_connection()
-    except Exception as exc:
-        logging.error("Connection or handshake failed: %s", exc, exc_info=args.verbose)
-        sys.exit(1)
+    driver.boot()
     
-    try: 
-        driver.param_config()
-    except Exception as exc:
-        logging.error("Parameter config failed: %s", exc, exc_info=args.verbose)
-        sys.exit(1)
-    
-    driver._start_threads()
+    driver.measurement_loop()
 
-    driver.change_state()
-    driver.change_state()
-    
-    # while True:
-    #     try:
-    #         driver.get_measurement(
-    #             driver.settings.pre_measure_polls,
-    #             driver.settings.poll_delay,
-    #             driver.settings.data_seconds,
-    #             driver.settings.max_data_frames,
-    #             driver.settings.output,
-    #             driver.settings.plot_enabled,
-    #             driver.settings.show_plot,
-    #             driver.settings.plot_output
-    #         )
-    #     except KeyboardInterrupt:
-    #         logging.info("Shutting down")
-    #         driver.shut_down()
-    #         break
-    #     except Exception as exc:  # pylint: disable=broad-except
-    #         logging.error("Measurement failed: %s", exc, exc_info=args.verbose)
-    #         sys.exit(1)
-    try:
-        driver.get_measurement(
-            driver.settings.pre_measure_polls,
-            driver.settings.poll_delay,
-            driver.settings.data_seconds,
-            driver.settings.max_data_frames,
-            driver.settings.output,
-            driver.settings.plot_enabled,
-            driver.settings.show_plot,
-            driver.settings.plot_output
-        )
-    except Exception as exc:  # pylint: disable=broad-except
-        logging.error("background scan failed: %s", exc, exc_info=args.verbose)
-        sys.exit(1)
-    driver.change_state()
-
-    try:
-        driver.get_measurement(
-            driver.settings.pre_measure_polls,
-            driver.settings.poll_delay,
-            driver.settings.data_seconds,
-            driver.settings.max_data_frames,
-            driver.settings.output,
-            driver.settings.plot_enabled,
-            driver.settings.show_plot,
-            driver.settings.plot_output
-        )
-    except Exception as exc:  # pylint: disable=broad-except
-        logging.error("Measurement failed: %s", exc, exc_info=args.verbose)
-        sys.exit(1)
-    driver.change_state()
-
-    # plt.style.use('.\\scienceplots\\science.mplstyle')
-
-    plt.figure(figsize=(10, 6))
-    plt.plot(driver.absorbance_spectrum[0], driver.absorbance_spectrum[1], linewidth=1.0, label=r"Raw Estimation", alpha=0.8)
-
-    plt.legend()
-    plt.xlim(4000, 650)
-
-    plt.xlabel("Wavenumber (cm^-1)")
-    plt.ylabel("Absorbance")
-    plt.title("Demo run on background sample")
-
-    plt.grid(True, which='both', linestyle='--', alpha=0.5)
-
-    plt.show()
-        
-        
-
+    driver.plot_spectrum() 
 
 if __name__ == "__main__":
     main(sys.argv[1:])
-
-
-
-"""
-
-
-
-def main(argv: List[str]) -> None:
-    args = parse_args(argv)
-    configure_logging(args.verbose)
-    logging.info("CaryFTIR.py revision: %s", SCRIPT_REVISION)
-    logging.info("CaryFTIR.py path: %s", os.path.abspath(__file__))
-    hej = False
-    try:
-        run_measurement(
-            vendor_id=args.vid,
-            product_id=args.pid,
-            start_cm=args.start,
-            stop_cm=args.stop,
-            resolution=args.resolution,
-            output=args.out,
-            data_seconds=args.data_seconds,
-            max_data_frames=args.max_data_frames,
-            pre_measure_polls=args.pre_measure_polls,
-            poll_delay=args.poll_delay,
-            plot_enabled=not args.no_plot,
-            plot_output=args.plot_out,
-            show_plot=args.show_plot,
-        )
-    except Exception as exc:  # pylint: disable=broad-except
-        logging.error("Measurement failed: %s", exc, exc_info=args.verbose)
-        sys.exit(1)
-
-
-if __name__ == "__main__":
-    main(sys.argv[1:])
-
-
-"""

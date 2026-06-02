@@ -1,0 +1,5 @@
+matplotlib
+pyusb
+numpy
+scipy
+pynput
